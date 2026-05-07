@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS memberships;
+DROP TABLE IF EXISTS organizations;
+DROP TABLE IF EXISTS users;

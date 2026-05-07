@@ -15,7 +15,7 @@ func Load() *Config {
 	_ = godotenv.Load()
 
 	return &Config{
-		Port:  getEnv("PORT", "8080"),
+		Port:  getEnv("APP_PORT", "8080"),
 		DBUrl: getEnv("DATABASE_URL", ""),
 	}
 }

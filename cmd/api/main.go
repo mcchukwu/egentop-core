@@ -4,17 +4,25 @@ import (
 	//	"context"
 	"log"
 	"net/http"
+
 	//	"os"
 	//	"os/signal"
 	//	"syscall"
 	//	"time"
 
 	"github.com/mcchukwu/egentop/pkg/config"
+	"github.com/mcchukwu/egentop/pkg/db"
 	"github.com/mcchukwu/egentop/pkg/logger"
 )
 
 func main() {
 	cfg := config.Load()
+
+	if err := db.Connect(cfg.DBUrl); err != nil {
+		log.Fatal(err)
+	}
+
+	logger.Info("Connected to database")
 
 	mux := http.NewServeMux()
 

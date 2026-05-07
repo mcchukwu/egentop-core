@@ -1,4 +1,52 @@
-bin/*
-.log
+# BINARIES
+bin/
+dist/
+build/
+*.exe
+*.dll
+*.so
+*.dylib
 
+# GO
+vendor/
+coverage.out
+*.test
+
+# ENVIRONMENT
 .env
+.env.local
+.env.production
+.env.staging
+
+# IDE
+.vscode/
+.idea/
+
+# OS FILES
+.DS_Store
+Thumbs.db
+
+# LOGS
+*.log
+logs/
+
+# DOCKER
+docker-data/
+
+# TEMP FILES
+tmp/
+temp/
+
+# DATABASE
+*.sqlite
+*.db
+
+# TEST OUTPUT
+coverage/
+*.coverprofile
+
+# AIR / HOT RELOAD
+.air/
+
+# GENERATED FILES
+*.out
