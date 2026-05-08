@@ -10,6 +10,7 @@ import (
 	//	"syscall"
 	//	"time"
 
+	"github.com/mcchukwu/egentop/internal/auth"
 	"github.com/mcchukwu/egentop/pkg/config"
 	"github.com/mcchukwu/egentop/pkg/db"
 	"github.com/mcchukwu/egentop/pkg/logger"
@@ -24,12 +25,17 @@ func main() {
 
 	logger.Info("Connected to database")
 
+	authService := auth.NewAuthService(db.DB)
+	authHandler := auth.NewAuthHandler(authService)
+
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("egento-core-ok"))
 	})
+
+	mux.HandleFunc("/v1/auth/register", authHandler.Register)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
