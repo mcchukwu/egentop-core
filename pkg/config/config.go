@@ -1,22 +1,49 @@
 package config
 
 import (
+	"log"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	Port  string
-	DBUrl string
+	AppEnv string
+
+	AppPort string
+
+	DatabaseURL string
+
+	JWTSecret string
+
+	AccessTokenTTLMinutes int
+	RefreshTokenTTLHours  int
 }
 
 func Load() *Config {
-	_ = godotenv.Load()
+	err := godotenv.Load()
+	if err != nil {
+		log.Println(".env file not found")
+	}
+
+	accessTokenTTLMinutes, err := strconv.Atoi(getEnv("ACCESS_TOKEN_TTL_MINUTES", "15"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	refreshTokenTTLHours, err := strconv.Atoi(getEnv("REFRESH_TOKEN_TTL_HOURS", "24"))
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	return &Config{
-		Port:  getEnv("APP_PORT", "8080"),
-		DBUrl: getEnv("DATABASE_URL", ""),
+		AppEnv:                getEnv("APP_ENV", ""),
+		AppPort:               getEnv("APP_PORT", "8080"),
+		DatabaseURL:           getEnv("DATABASE_URL", ""),
+		JWTSecret:             getEnv("JWT_SECRET", ""),
+		AccessTokenTTLMinutes: accessTokenTTLMinutes,
+		RefreshTokenTTLHours:  refreshTokenTTLHours,
 	}
 }
 
