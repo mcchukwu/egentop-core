@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"net/http"
 
+	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/organization"
+	"github.com/mcchukwu/egentop/internal/response"
 )
 
 type OrganizationMiddleware struct {
@@ -45,11 +47,11 @@ func (m *OrganizationMiddleware) LoadOrganization(next http.Handler) http.Handle
 
 		if err != nil {
 			if err == sql.ErrNoRows {
-				http.Error(w, "organization not found", http.StatusNotFound)
+				response.HandleError(w, apperrors.ErrOrganizationNotFound)
 				return
 			}
 
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			response.HandleError(w, apperrors.ErrInternalServer)
 			return
 		}
 

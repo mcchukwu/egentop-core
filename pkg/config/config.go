@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -19,6 +20,8 @@ type Config struct {
 
 	AccessTokenTTLMinutes int
 	RefreshTokenTTLHours  int
+
+	CORSAllowedOrigins []string
 }
 
 func Load() *Config {
@@ -44,6 +47,7 @@ func Load() *Config {
 		JWTSecret:             getEnv("JWT_SECRET", ""),
 		AccessTokenTTLMinutes: accessTokenTTLMinutes,
 		RefreshTokenTTLHours:  refreshTokenTTLHours,
+		CORSAllowedOrigins:    strings.Split(getEnv("CORS_ALLOWED_ORIGINS", ""), ","),
 	}
 }
 

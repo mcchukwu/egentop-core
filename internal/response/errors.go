@@ -1,0 +1,100 @@
+package response
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+
+	"github.com/mcchukwu/egentop/internal/apperrors"
+)
+
+type ErrorDetail struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type ErrorResponse struct {
+	Success bool        `json:"success"`
+	Error   ErrorDetail `json:"error"`
+}
+
+type ValidationErrorResponse struct {
+	Success bool `json:"success"`
+	Error   struct {
+		Code    string            `json:"code"`
+		Message string            `json:"message"`
+		Fields  map[string]string `json:"fields"`
+	} `json:"error"`
+}
+
+func Error(w http.ResponseWriter, status int, code string, message string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	w.WriteHeader(status)
+
+	json.NewEncoder(w).Encode(ErrorResponse{
+		Success: false,
+		Error: ErrorDetail{
+			Code:    code,
+			Message: message,
+		},
+	})
+}
+
+func HandleError(w http.ResponseWriter, err error) {
+	switch {
+	// AUTH
+	case errors.Is(err, apperrors.ErrInvalidCredentials):
+		Error(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
+	case errors.Is(err, apperrors.ErrUnauthorized):
+		Error(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+	case errors.Is(err, apperrors.ErrForbidden):
+		Error(w, http.StatusForbidden, "forbidden", "access denied")
+	case errors.Is(err, apperrors.ErrSessionExpired):
+		Error(w, http.StatusUnauthorized, "session_expired", "session expired")
+	case errors.Is(err, apperrors.ErrInvalidToken):
+		Error(w, http.StatusUnauthorized, "invalid_token", "invalid token")
+	case errors.Is(err, apperrors.ErrInvalidPassword):
+		Error(w, http.StatusUnauthorized, "invalid_password", "invalid password")
+
+		// USERS
+	case errors.Is(err, apperrors.ErrUserNotFound):
+		Error(w, http.StatusNotFound, "user_already_exists", "user already exists")
+	case errors.Is(err, apperrors.ErrEmailAlreadyExists):
+		Error(w, http.StatusConflict, "email_already_exists", "email already exists")
+	case errors.Is(err, apperrors.ErrPhoneAlreadyExists):
+		Error(w, http.StatusConflict, "phone_already_exists", "phone already exists")
+
+	// ORGS
+	case errors.Is(err, apperrors.ErrOrganizationNotFound):
+		Error(w, http.StatusNotFound, "organization_not_found", "organization not found")
+
+	// VALIDATION
+	case errors.Is(err, apperrors.ErrValidation):
+		Error(w, http.StatusBadRequest, "validation_error", "validation failed")
+
+	// RATE LIMIT
+	case errors.Is(err, apperrors.ErrRateLimited):
+		Error(w, http.StatusTooManyRequests, "rate_limited", "too many requests")
+
+	// DEFAULT
+	default:
+		Error(w, http.StatusInternalServerError, "internal_server_error", "internal server error")
+	}
+}
+
+func ValidationError(w http.ResponseWriter, fields map[string]string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	w.WriteHeader(http.StatusBadRequest)
+
+	response := ValidationErrorResponse{
+		Success: false,
+	}
+
+	response.Error.Code = "validation_error"
+	response.Error.Message = "validation failed"
+	response.Error.Fields = fields
+
+	json.NewEncoder(w).Encode(response)
+}

@@ -1,22 +1,24 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 
+	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/middleware"
+	"github.com/mcchukwu/egentop/internal/response"
 )
 
 func Me(w http.ResponseWriter, r *http.Request) {
-
-	userID := r.Context().Value(middleware.UserIDKey)
+	userID, ok := r.Context().Value(middleware.UserIDKey).(string)
+	if !ok {
+		response.HandleError(w, apperrors.ErrUserNotFound)
+		return
+	}
 
 	resp := map[string]interface{}{
 		"authenticated": true,
 		"user_id":       userID,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-
-	json.NewEncoder(w).Encode(resp)
+	response.OK(w, resp)
 }

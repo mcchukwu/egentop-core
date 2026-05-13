@@ -269,6 +269,19 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 	return newTokenString, newRefreshToken, nil
 }
 
+// Logout revokes sessions for a user's device
+func (s *AuthService) Logout(ctx context.Context, sessionID string) error {
+	_, err := s.DB.ExecContext(ctx, `
+		UPDATE sessions
+		SET revoked = true,
+	    revoked_at = NOW()
+		WHERE id = $1
+	`,
+		sessionID)
+
+	return err
+}
+
 // LogoutAllDevices revokes all sessions for a user
 func (s *AuthService) LogoutAllDevices(ctx context.Context, userID string) error {
 	_, err := s.DB.ExecContext(ctx, `

@@ -3,6 +3,7 @@ package middleware
 import (
 	"database/sql"
 	"net/http"
+	"slices"
 
 	"github.com/mcchukwu/egentop/internal/organization"
 )
@@ -58,11 +59,8 @@ func (m *RBACMiddleware) RequireRole(allowedRoles ...string) func(http.Handler) 
 
 			allowed := false
 
-			for _, allowedRole := range allowedRoles {
-				if role == allowedRole {
-					allowed = true
-					break
-				}
+			if slices.Contains(allowedRoles, role) {
+				allowed = true
 			}
 
 			if !allowed {

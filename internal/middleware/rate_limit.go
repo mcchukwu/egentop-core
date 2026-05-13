@@ -12,7 +12,7 @@ type clientLimiter struct {
 	lastSeen time.Time
 }
 
-type RateLimiter struct {
+type RateLimiterMiddleware struct {
 	mu sync.Mutex
 
 	clients map[string]*clientLimiter
@@ -21,8 +21,8 @@ type RateLimiter struct {
 	window      time.Duration
 }
 
-func NewRateLimiter(maxRequests int, window time.Duration) *RateLimiter {
-	rl := &RateLimiter{
+func NewRateLimiterMiddleware(maxRequests int, window time.Duration) *RateLimiterMiddleware {
+	rl := &RateLimiterMiddleware{
 		clients:     make(map[string]*clientLimiter),
 		maxRequests: maxRequests,
 		window:      window,
@@ -33,7 +33,7 @@ func NewRateLimiter(maxRequests int, window time.Duration) *RateLimiter {
 	return rl
 }
 
-func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
+func (rl *RateLimiterMiddleware) Limit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := getClientIP(r)
 
@@ -71,8 +71,7 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-func (rl *RateLimiter) cleanup() {
-
+func (rl *RateLimiterMiddleware) cleanup() {
 	ticker := time.NewTicker(5 * time.Minute)
 
 	for range ticker.C {
@@ -91,7 +90,6 @@ func (rl *RateLimiter) cleanup() {
 }
 
 func getClientIP(r *http.Request) string {
-
 	// reverse proxy support
 	forwarded := r.Header.Get(
 		"X-Forwarded-For",
