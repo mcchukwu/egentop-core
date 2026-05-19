@@ -19,6 +19,7 @@ func Connect(dsn string) error {
 	database.SetMaxOpenConns(25)
 	database.SetMaxIdleConns(25)
 	database.SetConnMaxLifetime(5 * time.Minute)
+	database.SetConnMaxIdleTime(2 * time.Minute)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

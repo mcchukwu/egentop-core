@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"log"
 	"os"
 	"strconv"
@@ -49,6 +50,34 @@ func Load() *Config {
 		RefreshTokenTTLHours:  refreshTokenTTLHours,
 		CORSAllowedOrigins:    strings.Split(getEnv("CORS_ALLOWED_ORIGINS", ""), ","),
 	}
+}
+
+func (c *Config) Validate() error {
+	if c.AppEnv != "production" && c.AppEnv != "development" {
+		return errors.New("invalid app env")
+	}
+
+	if c.AppPort == "" {
+		return errors.New("invalid app port")
+	}
+
+	if c.DatabaseURL == "" {
+		return errors.New("database url is required")
+	}
+
+	if c.JWTSecret == "" {
+		return errors.New("jwt secret is required")
+	}
+
+	if len(c.JWTSecret) < 32 {
+		return errors.New("jwt secret must be at least 32 characters")
+	}
+
+	if len(c.CORSAllowedOrigins) == 0 {
+		return errors.New("cors allowed origins is required")
+	}
+
+	return nil
 }
 
 func getEnv(key, fallback string) string {

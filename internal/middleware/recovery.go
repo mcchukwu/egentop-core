@@ -1,17 +1,29 @@
 package middleware
 
 import (
-	"log"
+	"fmt"
 	"net/http"
 	"runtime/debug"
+
+	"github.com/mcchukwu/egentop/internal/apperrors"
+	"github.com/mcchukwu/egentop/internal/response"
+	"github.com/mcchukwu/egentop/pkg/logger"
 )
 
-func Recovery(next http.Handler) http.Handler {
+type RecoveryMiddleware struct{}
+
+func NewRecoveryMiddleware() *RecoveryMiddleware {
+	return &RecoveryMiddleware{}
+}
+
+func (m *RecoveryMiddleware) Recover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("[PANIC] %v\n%s", err, debug.Stack())
-				http.Error(w, "internal server error", http.StatusInternalServerError)
+				requestID, _ := r.Context().Value(RequestIDKey).(string)
+
+				logger.Error(fmt.Sprintf("panic recovered request_id=%s panic=%v stack=%s", requestID, err, debug.Stack()))
+				response.HandleError(w, apperrors.ErrInternalServer)
 			}
 		}()
 

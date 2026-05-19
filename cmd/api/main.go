@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 
 	"os"
@@ -20,11 +19,17 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
+
 	mux := http.NewServeMux()
 
 	// Connect to database
 	if err := db.Connect(cfg.DatabaseURL); err != nil {
-		log.Fatal(err)
+		logger.Error("Failed to connect to database")
+		os.Exit(1)
 	}
 	logger.Info("Connected to database")
 
@@ -40,29 +45,31 @@ func main() {
 	loggingMiddleware := middleware.NewLoggingMiddleware()
 	securityHeadersMiddleware := middleware.NewSecurityHeadersMiddleware()
 	corsMiddleware := middleware.NewCorsMiddleware(cfg.CORSAllowedOrigins)
+	recoveryMiddleware := middleware.NewRecoveryMiddleware()
 
 	// Configure services and handlers
 	authService := auth.NewAuthService(db.DB, []byte(cfg.JWTSecret))
 	authHandler := handler.NewAuthHandler(authService)
 
 	// Protected routes
-	mux.Handle("GET /v1/me", authMiddleware.RequireAuth(http.HandlerFunc(handler.Me)))
+	mux.Handle("GET /v1/me", authMiddleware.RequireAuth(http.HandlerFunc(handler.MeHandler)))
 	mux.Handle("POST /v1/auth/logout", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.Logout)))
 	mux.Handle("POST /v1/auth/logout-all", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.LogoutAllDevices)))
 
-	// Auth routes
+	// Other routes
 	mux.Handle("POST /v1/auth/register", registerLimiterMiddleware.Limit(http.HandlerFunc(authHandler.Register)))
 	mux.Handle("POST /v1/auth/login", loginLimiterMiddleware.Limit(http.HandlerFunc(authHandler.Login)))
 	mux.Handle("POST /v1/auth/refresh", refreshLimiterMiddleware.Limit(http.HandlerFunc(authHandler.RefreshToken)))
 
-	// Health check (for load balancers)
-	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Egento-core-ok"))
-	})
+	// Health check route (for load balancers)
+	healthHandler := handler.NewHealthHandler(db.DB)
+
+	mux.HandleFunc("GET /v1/health", healthHandler.Health)
+	mux.HandleFunc("GET /v1/ready", healthHandler.Ready)
+	mux.HandleFunc("GET /v1/live", healthHandler.Live)
 
 	// chain middleware
-	handlerChain := middleware.Recovery(requestIDMiddleware.Assign(loggingMiddleware.Log(securityHeadersMiddleware.Secure(corsMiddleware.Cors(rateLimiterMiddleware.Limit(mux))))))
+	handlerChain := recoveryMiddleware.Recover((requestIDMiddleware.Assign(loggingMiddleware.Log(securityHeadersMiddleware.Secure(corsMiddleware.Cors(rateLimiterMiddleware.Limit(mux)))))))
 
 	server := &http.Server{
 		Addr:         ":" + cfg.AppPort,
@@ -76,7 +83,8 @@ func main() {
 	go func() {
 		logger.Info("Egento API starting on port " + cfg.AppPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal(err)
+			logger.Error("Failed to start server")
+			os.Exit(1)
 		}
 	}()
 

@@ -6,11 +6,24 @@ import (
 )
 
 type SuccessResponse struct {
-	Success bool        `json:"success"`
-	Data    interface{} `json:"data,omitempty"`
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	Data    any    `json:"data,omitempty"`
 }
 
-func JSON(w http.ResponseWriter, status int, data interface{}) {
+func Success(w http.ResponseWriter, status int, message string, data any) {
+	w.Header().Set("Content-Type", "application/json")
+
+	w.WriteHeader(status)
+
+	json.NewEncoder(w).Encode(SuccessResponse{
+		Success: true,
+		Message: message,
+		Data:    data,
+	})
+}
+
+func JSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 
 	w.WriteHeader(status)
@@ -21,11 +34,11 @@ func JSON(w http.ResponseWriter, status int, data interface{}) {
 	})
 }
 
-func OK(w http.ResponseWriter, data interface{}) {
+func OK(w http.ResponseWriter, data any) {
 	JSON(w, http.StatusOK, data)
 }
 
-func Created(w http.ResponseWriter, data interface{}) {
+func Created(w http.ResponseWriter, data any) {
 	JSON(w, http.StatusCreated, data)
 }
 
