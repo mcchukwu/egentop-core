@@ -52,6 +52,8 @@ var (
 	// MEMBERSHIPS
 	ErrMembershipNotFound = errors.New("membership not found")
 
+	ErrMembershipRoleNotFound = errors.New("membership role not found")
+
 	ErrAlreadyMember = errors.New("user already belongs to organization")
 
 	ErrInvitationPending = errors.New("invitation already pending")

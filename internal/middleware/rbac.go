@@ -3,9 +3,10 @@ package middleware
 import (
 	"database/sql"
 	"net/http"
-	"slices"
 
-	"github.com/mcchukwu/egentop/internal/organization"
+	"github.com/mcchukwu/egentop/internal/apperrors"
+	"github.com/mcchukwu/egentop/internal/org"
+	"github.com/mcchukwu/egentop/internal/response"
 )
 
 type RBACMiddleware struct {
@@ -18,53 +19,30 @@ func NewRBACMiddleware(db *sql.DB) *RBACMiddleware {
 	}
 }
 
-func (m *RBACMiddleware) RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
+func (m *RBACMiddleware) RequireRole(allowedRoles ...org.Role) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userID, ok := r.Context().Value(UserIDKey).(string)
-			if !ok {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			membership := GetMembership(r.Context())
+			if membership == nil {
+				response.HandleError(w, apperrors.ErrMembershipNotFound)
 				return
 			}
 
-			org, ok := r.Context().Value(OrganizationKey).(*organization.Organization)
-			if !ok {
-				http.Error(w, "organization missing", http.StatusInternalServerError)
-				return
-			}
-
-			var role string
-
-			err := m.DB.QueryRowContext(r.Context(),
-				`
-				SELECT role
-				FROM memberships
-				WHERE user_id = $1
-				  AND organization_id = $2
-				  AND status = 'active'
-				`,
-				userID,
-				org.ID,
-			).Scan(&role)
-
-			if err != nil {
-				if err == sql.ErrNoRows {
-					http.Error(w, "forbidden", http.StatusForbidden)
-					return
-				}
-
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-				return
-			}
+			userRoleLevel := org.RoleHierarchy[membership.Role]
 
 			allowed := false
 
-			if slices.Contains(allowedRoles, role) {
-				allowed = true
+			for _, role := range allowedRoles {
+				requiredRoleLevel := org.RoleHierarchy[role]
+
+				if userRoleLevel >= requiredRoleLevel {
+					allowed = true
+					break
+				}
 			}
 
 			if !allowed {
-				http.Error(w, "forbidden", http.StatusForbidden)
+				response.HandleError(w, apperrors.ErrForbidden)
 				return
 			}
 

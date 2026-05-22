@@ -40,7 +40,6 @@ func (rl *RateLimiterMiddleware) Limit(next http.Handler) http.Handler {
 		rl.mu.Lock()
 
 		client, exists := rl.clients[ip]
-
 		if !exists {
 			client = &clientLimiter{
 				requests: 0,
@@ -75,11 +74,9 @@ func (rl *RateLimiterMiddleware) cleanup() {
 	ticker := time.NewTicker(5 * time.Minute)
 
 	for range ticker.C {
-
 		rl.mu.Lock()
 
 		for ip, client := range rl.clients {
-
 			if time.Since(client.lastSeen) > 10*time.Minute {
 				delete(rl.clients, ip)
 			}
@@ -94,7 +91,6 @@ func getClientIP(r *http.Request) string {
 	forwarded := r.Header.Get(
 		"X-Forwarded-For",
 	)
-
 	if forwarded != "" {
 		return forwarded
 	}
@@ -102,7 +98,6 @@ func getClientIP(r *http.Request) string {
 	ip, _, err := net.SplitHostPort(
 		r.RemoteAddr,
 	)
-
 	if err != nil {
 		return r.RemoteAddr
 	}

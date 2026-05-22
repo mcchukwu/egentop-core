@@ -100,6 +100,9 @@ CREATE TABLE audit_logs (
 CREATE INDEX idx_memberships_user_org
 ON memberships(user_id, organization_id);
 
+CREATE UNIQUE INDEX idx_unique_membership
+ON memberships(user_id, organization_id);
+
 CREATE INDEX idx_sessions_user_id
 ON sessions(user_id);
 

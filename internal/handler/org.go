@@ -6,22 +6,22 @@ import (
 
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/middleware"
-	"github.com/mcchukwu/egentop/internal/organization"
+	"github.com/mcchukwu/egentop/internal/org"
 	"github.com/mcchukwu/egentop/internal/response"
 )
 
 type OrgHandler struct {
-	OrgService *organization.OrgService
+	OrgService *org.OrgService
 }
 
-func NewOrgHandler(service *organization.OrgService) *OrgHandler {
+func NewOrgHandler(service *org.OrgService) *OrgHandler {
 	return &OrgHandler{
 		OrgService: service,
 	}
 }
 
 func (h *OrgHandler) CreateOrgs(w http.ResponseWriter, r *http.Request) {
-	var req organization.CreateOrganizationRequest
+	var req org.CreateOrganizationRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.HandleError(w, apperrors.ErrInvalidRequestBody)

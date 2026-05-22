@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/mcchukwu/egentop/internal/apperrors"
-	"github.com/mcchukwu/egentop/internal/organization"
+	"github.com/mcchukwu/egentop/internal/org"
 	"github.com/mcchukwu/egentop/internal/response"
 )
 
@@ -24,11 +24,11 @@ func (m *OrgMiddleware) LoadOrg(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		orgID := r.PathValue("orgID")
 		if orgID == "" {
-			http.Error(w, "missing organization id", http.StatusBadRequest)
+			response.HandleError(w, apperrors.ErrOrganizationNotFound)
 			return
 		}
 
-		var org organization.Organization
+		var organization org.Organization
 
 		err := m.DB.QueryRowContext(r.Context(),
 			`
@@ -43,8 +43,7 @@ func (m *OrgMiddleware) LoadOrg(next http.Handler) http.Handler {
 			WHERE id = $1
 			`,
 			orgID,
-		).Scan(&org.ID, &org.Name, &org.Slug, &org.Status, &org.CreatedAt, &org.UpdatedAt)
-
+		).Scan(&organization.ID, &organization.Name, &organization.Slug, &organization.Status, &organization.CreatedAt, &organization.UpdatedAt)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				response.HandleError(w, apperrors.ErrOrganizationNotFound)
@@ -56,12 +55,12 @@ func (m *OrgMiddleware) LoadOrg(next http.Handler) http.Handler {
 		}
 
 		// critical tenant validation
-		if org.Status != "active" {
-			http.Error(w, "organization unavailable", http.StatusForbidden)
+		if organization.Status != "active" {
+			response.HandleError(w, apperrors.ErrOrganizationSuspended)
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), OrganizationKey, &org)
+		ctx := context.WithValue(r.Context(), OrganizationKey, &organization)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

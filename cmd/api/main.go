@@ -44,6 +44,7 @@ func main() {
 
 	orgMiddleware := middleware.NewOrgMiddleware(db.DB)
 	rbacMiddleware := middleware.NewRBACMiddleware(db.DB)
+	orgAccessMiddleware := middleware.NewOrgAccessMiddleware(db.DB)
 
 	requestIDMiddleware := middleware.NewRequestIDMiddleware()
 	loggingMiddleware := middleware.NewLoggingMiddleware()
@@ -58,6 +59,8 @@ func main() {
 	orgService := org.NewOrgService(db.DB)
 	orgHandler := handler.NewOrgHandler(orgService)
 
+	membershipHandler := handler.NewMembershipHandler(orgService)
+
 	// Protected routes
 	mux.Handle("GET /v1/me", authMiddleware.RequireAuth(http.HandlerFunc(handler.MeHandler)))
 	mux.Handle("POST /v1/auth/logout", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.Logout)))
@@ -67,7 +70,10 @@ func main() {
 	mux.Handle("GET /v1/orgs", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.GetOrgs)))
 
 	// RBAC on organizations
-	mux.Handle("GET /v1/orgs/{orgID}/members", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(rbacMiddleware.RequireRole(string(org.RoleAdmin), string(org.RoleOwner))(http.HandlerFunc(orgHandler.GetOrgMembers)))))
+	mux.Handle("GET /v1/orgs/{orgID}/members", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleAdmin, org.RoleOwner)(http.HandlerFunc(orgHandler.GetOrgMembers))))))
+	mux.Handle("POST /v1/orgs/{orgID}/members", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleAdmin, org.RoleOwner)(http.HandlerFunc(membershipHandler.AddOrgMember))))))
+	mux.Handle("PATCH /v1/orgs/{orgID}/members/{userID}", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleOwner)(http.HandlerFunc(membershipHandler.UpdateOrgMemberRole))))))
+	mux.Handle("DELETE /v1/orgs/{orgID}/members/{userID}", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleOwner)(http.HandlerFunc(membershipHandler.RemoveOrgMember))))))
 
 	// Other routes
 	mux.Handle("POST /v1/auth/register", registerLimiterMiddleware.Limit(http.HandlerFunc(authHandler.Register)))

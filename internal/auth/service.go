@@ -310,7 +310,6 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 
 		return nil
 	})
-
 	if err != nil {
 		return "", "", apperrors.ErrInternalServer
 	}
@@ -350,8 +349,11 @@ func (s *AuthService) Logout(ctx context.Context, sessionID string) error {
 
 		return nil
 	})
+	if err != nil {
+		return apperrors.ErrInternalServer
+	}
 
-	return err
+	return nil
 }
 
 // LogoutAllDevices revokes all sessions for a user
@@ -385,8 +387,11 @@ func (s *AuthService) LogoutAllDevices(ctx context.Context, userID string) error
 
 		return nil
 	})
+	if err != nil {
+		return apperrors.ErrInternalServer
+	}
 
-	return err
+	return nil
 }
 
 // hashPassword hashes the password using bcrypt

@@ -3,7 +3,7 @@ package middleware
 import (
 	"context"
 
-	"github.com/mcchukwu/egentop/internal/organization"
+	"github.com/mcchukwu/egentop/internal/org"
 )
 
 func GetUserID(ctx context.Context) string {
@@ -16,7 +16,12 @@ func GetSessionID(ctx context.Context) string {
 	return sessionID
 }
 
-func GetOrganization(ctx context.Context) *organization.Organization {
-	org, _ := ctx.Value(OrganizationKey).(*organization.Organization)
+func GetOrganization(ctx context.Context) *org.Organization {
+	org, _ := ctx.Value(OrganizationKey).(*org.Organization)
 	return org
+}
+
+func GetMembership(ctx context.Context) *org.Membership {
+	membership, _ := ctx.Value(MembershipKey).(*org.Membership)
+	return membership
 }
