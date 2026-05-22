@@ -10,17 +10,17 @@ import (
 	"github.com/mcchukwu/egentop/internal/response"
 )
 
-type OrganizationMiddleware struct {
+type OrgMiddleware struct {
 	DB *sql.DB
 }
 
-func NewOrganizationMiddleware(db *sql.DB) *OrganizationMiddleware {
-	return &OrganizationMiddleware{
+func NewOrgMiddleware(db *sql.DB) *OrgMiddleware {
+	return &OrgMiddleware{
 		DB: db,
 	}
 }
 
-func (m *OrganizationMiddleware) LoadOrganization(next http.Handler) http.Handler {
+func (m *OrgMiddleware) LoadOrg(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		orgID := r.PathValue("orgID")
 		if orgID == "" {

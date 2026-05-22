@@ -85,7 +85,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Return response
-	response.OK(w, map[string]interface{}{
+	response.OK(w, map[string]any{
 		"access_token": accessToken,
 	})
 }
@@ -117,7 +117,7 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Return new access token
-	response.OK(w, map[string]interface{}{
+	response.OK(w, map[string]any{
 		"access_token": accessToken,
 	})
 }

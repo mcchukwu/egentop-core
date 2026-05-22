@@ -15,7 +15,7 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := map[string]interface{}{
+	resp := map[string]any{
 		"authenticated": true,
 		"user_id":       userID,
 	}
