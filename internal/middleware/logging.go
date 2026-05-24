@@ -33,14 +33,11 @@ func (m *LoggingMiddleware) Log(next http.Handler) http.Handler {
 	})
 }
 
+// ResponseRecorder is wrapper of http.ResponseWriter that
+// provides additional information about written status code
 type ResponseRecorder struct {
 	http.ResponseWriter
 	StatusCode int
-}
-
-func (r *ResponseRecorder) WriteHeader(statusCode int) {
-	r.StatusCode = statusCode
-	r.ResponseWriter.WriteHeader(statusCode)
 }
 
 func NewResponseRecorder(w http.ResponseWriter) *ResponseRecorder {
@@ -48,4 +45,9 @@ func NewResponseRecorder(w http.ResponseWriter) *ResponseRecorder {
 		ResponseWriter: w,
 		StatusCode:     http.StatusOK,
 	}
+}
+
+func (r *ResponseRecorder) WriteHeader(statusCode int) {
+	r.StatusCode = statusCode
+	r.ResponseWriter.WriteHeader(statusCode)
 }

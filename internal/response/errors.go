@@ -59,7 +59,7 @@ func HandleError(w http.ResponseWriter, err error) {
 
 		// USERS
 	case errors.Is(err, apperrors.ErrUserNotFound):
-		Error(w, http.StatusNotFound, "user_already_exists", "user already exists")
+		Error(w, http.StatusConflict, "user_already_exists", "user already exists")
 	case errors.Is(err, apperrors.ErrEmailAlreadyExists):
 		Error(w, http.StatusConflict, "email_already_exists", "email already exists")
 	case errors.Is(err, apperrors.ErrPhoneAlreadyExists):

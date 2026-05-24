@@ -3,11 +3,11 @@ package middleware
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/response"
 )
 
@@ -31,52 +31,49 @@ func NewAuthMiddleware(db *sql.DB, secret []byte) *AuthMiddleware {
 }
 
 func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
-			authHeader := r.Header.Get("Authorization")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
 
-			if authHeader == "" {
-				unauthorized(w)
-				return
+		if authHeader == "" {
+			response.HandleError(w, apperrors.ErrUnauthorized)
+			return
+		}
+
+		parts := strings.Split(authHeader, " ")
+
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			response.HandleError(w, apperrors.ErrInvalidToken)
+			return
+		}
+
+		tokenString := parts[1]
+
+		claims := &AccessTokenClaims{}
+
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+			// enforce HMAC signing only
+			_, ok := token.Method.(*jwt.SigningMethodHMAC)
+			if !ok {
+				return nil, apperrors.ErrInvalidToken
 			}
 
-			parts := strings.Split(authHeader, " ")
+			return m.JWTSecret, nil
+		})
 
-			if len(parts) != 2 || parts[0] != "Bearer" {
-				unauthorized(w)
-				return
-			}
+		if err != nil || !token.Valid {
+			response.HandleError(w, apperrors.ErrUnauthorized)
+			return
+		}
 
-			tokenString := parts[1]
+		if claims.UserID == "" || claims.SessionID == "" {
+			response.HandleError(w, apperrors.ErrUnauthorized)
+			return
+		}
 
-			claims := &AccessTokenClaims{}
-
-			token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-				// enforce HMAC signing only
-				_, ok := token.Method.(*jwt.SigningMethodHMAC)
-				if !ok {
-					return nil, errors.New(
-						"invalid signing method",
-					)
-				}
-
-				return m.JWTSecret, nil
-			})
-
-			if err != nil || !token.Valid {
-				unauthorized(w)
-				return
-			}
-
-			if claims.UserID == "" || claims.SessionID == "" {
-				unauthorized(w)
-				return
-			}
-
-			// validate active session
-			var exists bool
-			err = m.DB.QueryRowContext(r.Context(),
-				`
+		// validate active session
+		var exists bool
+		err = m.DB.QueryRowContext(r.Context(),
+			`
 				SELECT EXISTS (
 				SELECT 1
 				FROM sessions
@@ -85,29 +82,21 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				  AND revoked = false
 				  AND expires_at > NOW()
 			)`,
-				claims.SessionID,
-				claims.UserID,
-			).Scan(&exists)
+			claims.SessionID, claims.UserID).Scan(&exists)
+		if err != nil {
+			response.HandleError(w, err)
+			return
+		}
 
-			if err != nil {
-				response.HandleError(w, err)
-				return
-			}
+		if !exists {
+			response.HandleError(w, apperrors.ErrSessionExpired)
+			return
+		}
 
-			if !exists {
-				unauthorized(w)
-				return
-			}
+		// attach auth context
+		ctx := context.WithValue(r.Context(), UserIDKey, claims.UserID)
+		ctx = context.WithValue(ctx, SessionIDKey, claims.SessionID)
 
-			// attach auth context
-			ctx := context.WithValue(r.Context(), UserIDKey, claims.UserID)
-			ctx = context.WithValue(ctx, SessionIDKey, claims.SessionID)
-
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-}
-
-// Helpers
-func unauthorized(w http.ResponseWriter) {
-	http.Error(w, "unauthorized", http.StatusUnauthorized)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
