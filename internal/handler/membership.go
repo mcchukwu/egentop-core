@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/mcchukwu/egentop/internal/apperrors"
-	"github.com/mcchukwu/egentop/internal/middleware"
 	"github.com/mcchukwu/egentop/internal/org"
+	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
 )
 
@@ -21,7 +21,11 @@ func NewMembershipHandler(service *org.OrgService) *MembershipHandler {
 }
 
 func (h *MembershipHandler) AddOrgMember(w http.ResponseWriter, r *http.Request) {
-	organization := middleware.GetOrganization(r.Context())
+	organizationID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrOrganizationNotFound)
+		return
+	}
 
 	var req org.AddMemberRequest
 
@@ -36,7 +40,7 @@ func (h *MembershipHandler) AddOrgMember(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	err := h.OrgService.AddOrgMember(r.Context(), organization.ID, req.UserID, req.Role)
+	err := h.OrgService.AddOrgMember(r.Context(), organizationID, req.UserID, req.Role)
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return
@@ -46,7 +50,11 @@ func (h *MembershipHandler) AddOrgMember(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *MembershipHandler) UpdateOrgMemberRole(w http.ResponseWriter, r *http.Request) {
-	organization := middleware.GetOrganization(r.Context())
+	organizationID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrOrganizationNotFound)
+		return
+	}
 
 	targetUserID := r.PathValue("userID")
 
@@ -57,7 +65,7 @@ func (h *MembershipHandler) UpdateOrgMemberRole(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	err := h.OrgService.UpdateOrgMemberRole(r.Context(), organization.ID, targetUserID, req.Role)
+	err := h.OrgService.UpdateOrgMemberRole(r.Context(), organizationID, targetUserID, req.Role)
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return
@@ -67,11 +75,15 @@ func (h *MembershipHandler) UpdateOrgMemberRole(w http.ResponseWriter, r *http.R
 }
 
 func (h *MembershipHandler) RemoveOrgMember(w http.ResponseWriter, r *http.Request) {
-	organization := middleware.GetOrganization(r.Context())
+	organizationID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrOrganizationNotFound)
+		return
+	}
 
 	targetUserID := r.PathValue("userID")
 
-	err := h.OrgService.RemoveOrgMember(r.Context(), organization.ID, targetUserID)
+	err := h.OrgService.RemoveOrgMember(r.Context(), organizationID, targetUserID)
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return

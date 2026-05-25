@@ -1,28 +1,28 @@
-package handler
+package org
 
 import (
 	"encoding/json"
 	"net/http"
 
 	"github.com/mcchukwu/egentop/internal/apperrors"
-	"github.com/mcchukwu/egentop/internal/middleware"
-	"github.com/mcchukwu/egentop/internal/org"
+	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
 )
 
 type OrgHandler struct {
-	OrgService *org.OrgService
+	OrgService *OrgService
 }
 
-func NewOrgHandler(service *org.OrgService) *OrgHandler {
+func NewOrgHandler(service *OrgService) *OrgHandler {
 	return &OrgHandler{
 		OrgService: service,
 	}
 }
 
 func (h *OrgHandler) CreateOrgs(w http.ResponseWriter, r *http.Request) {
-	var req org.CreateOrganizationRequest
+	var req CreateOrganizationRequest
 
+	// Decode request body
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.HandleError(w, apperrors.ErrInvalidRequestBody)
 		return
@@ -34,7 +34,7 @@ func (h *OrgHandler) CreateOrgs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, ok := r.Context().Value(middleware.UserIDKey).(string)
+	userID, ok := requestctx.UserID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrUnauthorized)
 		return
@@ -52,7 +52,7 @@ func (h *OrgHandler) CreateOrgs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *OrgHandler) GetOrgs(w http.ResponseWriter, r *http.Request) {
-	userID, ok := r.Context().Value(middleware.UserIDKey).(string)
+	userID, ok := requestctx.UserID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrUnauthorized)
 		return
@@ -68,10 +68,13 @@ func (h *OrgHandler) GetOrgs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *OrgHandler) GetOrgMembers(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrInternalServer)
+		return
+	}
 
-	org := middleware.GetOrganization(r.Context())
-
-	members, err := h.OrgService.GetOrgMembers(r.Context(), org.ID)
+	members, err := h.OrgService.GetOrgMembers(r.Context(), orgID)
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return

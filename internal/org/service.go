@@ -23,6 +23,7 @@ func NewOrgService(db *sql.DB) *OrgService {
 // CreateOrg creates a new organization
 func (s *OrgService) CreateOrg(ctx context.Context, name string, slug string, ownerID string) (string, error) {
 	var orgID string
+
 	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
 		dbCtx, cancel := db.WithDBTimeout(ctx)
 		defer cancel()
@@ -72,6 +73,7 @@ func (s *OrgService) CreateOrg(ctx context.Context, name string, slug string, ow
 // GetUserOrg returns all organizations a user belongs to
 func (s *OrgService) GetUserOrg(ctx context.Context, userID string) ([]Membership, error) {
 	var result []Membership
+
 	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
 		dbCtx, cancel := db.WithDBTimeout(ctx)
 		defer cancel()

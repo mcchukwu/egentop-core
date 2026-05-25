@@ -1,12 +1,11 @@
 package middleware
 
 import (
-	"context"
 	"database/sql"
 	"net/http"
 
 	"github.com/mcchukwu/egentop/internal/apperrors"
-	"github.com/mcchukwu/egentop/internal/org"
+	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
 )
 
@@ -28,22 +27,17 @@ func (m *OrgMiddleware) LoadOrg(next http.Handler) http.Handler {
 			return
 		}
 
-		var organization org.Organization
+		var organizationStatus string
 
 		err := m.DB.QueryRowContext(r.Context(),
 			`
 			SELECT
-				id,
-				name,
-				slug,
 				status,
-				created_at,
-				updated_at
 			FROM organizations
 			WHERE id = $1
 			`,
 			orgID,
-		).Scan(&organization.ID, &organization.Name, &organization.Slug, &organization.Status, &organization.CreatedAt, &organization.UpdatedAt)
+		).Scan(&organizationStatus)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				response.HandleError(w, apperrors.ErrOrganizationNotFound)
@@ -55,13 +49,12 @@ func (m *OrgMiddleware) LoadOrg(next http.Handler) http.Handler {
 		}
 
 		// critical tenant validation
-		if organization.Status != "active" {
+		if organizationStatus != "active" {
 			response.HandleError(w, apperrors.ErrOrganizationSuspended)
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), OrganizationKey, &organization)
-
+		ctx := requestctx.WithOrganizationID(r.Context(), orgID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

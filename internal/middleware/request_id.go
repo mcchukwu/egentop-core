@@ -1,10 +1,10 @@
 package middleware
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/mcchukwu/egentop/internal/requestctx"
 )
 
 type RequestIDMiddleware struct{}
@@ -17,7 +17,7 @@ func (m *RequestIDMiddleware) Assign(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := uuid.NewString()
 
-		ctx := context.WithValue(r.Context(), RequestIDKey, requestID)
+		ctx := requestctx.WithRequestID(r.Context(), requestID)
 
 		w.Header().Set("X-Request-Id", requestID)
 

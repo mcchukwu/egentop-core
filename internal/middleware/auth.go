@@ -1,13 +1,13 @@
 package middleware
 
 import (
-	"context"
 	"database/sql"
 	"net/http"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/mcchukwu/egentop/internal/apperrors"
+	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
 )
 
@@ -50,7 +50,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 
 		claims := &AccessTokenClaims{}
 
-		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
 			// enforce HMAC signing only
 			_, ok := token.Method.(*jwt.SigningMethodHMAC)
 			if !ok {
@@ -72,6 +72,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 
 		// validate active session
 		var exists bool
+
 		err = m.DB.QueryRowContext(r.Context(),
 			`
 				SELECT EXISTS (
@@ -94,8 +95,8 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		}
 
 		// attach auth context
-		ctx := context.WithValue(r.Context(), UserIDKey, claims.UserID)
-		ctx = context.WithValue(ctx, SessionIDKey, claims.SessionID)
+		ctx := requestctx.WithUserID(r.Context(), claims.UserID)
+		ctx = requestctx.WithSessionID(ctx, claims.SessionID)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

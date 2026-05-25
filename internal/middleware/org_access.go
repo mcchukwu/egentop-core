@@ -1,12 +1,11 @@
 package middleware
 
 import (
-	"context"
 	"database/sql"
 	"net/http"
 
 	"github.com/mcchukwu/egentop/internal/apperrors"
-	"github.com/mcchukwu/egentop/internal/org"
+	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
 )
 
@@ -22,33 +21,29 @@ func NewOrgAccessMiddleware(db *sql.DB) *OrgAccessMiddleware {
 
 func (m *OrgAccessMiddleware) RequireMembership(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID := GetUserID(r.Context())
-		if userID == "" {
+		userID, ok := requestctx.UserID(r.Context())
+		if !ok {
 			response.HandleError(w, apperrors.ErrUnauthorized)
 			return
 		}
 
-		organization := GetOrganization(r.Context())
-		if organization == nil {
-			response.HandleError(w, apperrors.ErrOrganizationNotFound)
+		organizationID, ok := requestctx.OrganizationID(r.Context())
+		if !ok {
+			response.HandleError(w, apperrors.ErrUnauthorized)
 			return
 		}
 
-		var membership org.Membership
+		var membershipID string
 
 		err := m.DB.QueryRowContext(r.Context(), `
 			SELECT
-				user_id,
-				organization_id,
-				role,
-				status,
-				created_at
+				id,
 			FROM memberships
 			WHERE user_id = $1
 			AND organization_id = $2
 			AND status = 'active'
 			LIMIT 1
-		`, userID, organization.ID).Scan(&membership.UserID, &membership.OrganizationID, &membership.Role, &membership.Status, &membership.CreatedAt)
+		`, userID, organizationID).Scan(&membershipID)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				response.HandleError(w, apperrors.ErrForbidden)
@@ -59,7 +54,7 @@ func (m *OrgAccessMiddleware) RequireMembership(next http.Handler) http.Handler 
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), MembershipKey, &membership)
+		ctx := requestctx.WithMembershipID(r.Context(), membershipID)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

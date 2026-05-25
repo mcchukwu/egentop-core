@@ -19,6 +19,7 @@ const (
 )
 
 type Membership struct {
+	ID             string
 	UserID         string
 	OrganizationID string
 	Role           Role

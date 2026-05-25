@@ -59,7 +59,7 @@ func HandleError(w http.ResponseWriter, err error) {
 
 		// USERS
 	case errors.Is(err, apperrors.ErrUserNotFound):
-		Error(w, http.StatusConflict, "user_already_exists", "user already exists")
+		Error(w, http.StatusConflict, "user_not_found", "user not found")
 	case errors.Is(err, apperrors.ErrEmailAlreadyExists):
 		Error(w, http.StatusConflict, "email_already_exists", "email already exists")
 	case errors.Is(err, apperrors.ErrPhoneAlreadyExists):
@@ -88,13 +88,16 @@ func ValidationError(w http.ResponseWriter, fields map[string]string) {
 
 	w.WriteHeader(http.StatusBadRequest)
 
-	response := ValidationErrorResponse{
+	json.NewEncoder(w).Encode(ValidationErrorResponse{
 		Success: false,
-	}
-
-	response.Error.Code = "validation_error"
-	response.Error.Message = "validation failed"
-	response.Error.Fields = fields
-
-	json.NewEncoder(w).Encode(response)
+		Error: struct {
+			Code    string            `json:"code"`
+			Message string            `json:"message"`
+			Fields  map[string]string `json:"fields"`
+		}{
+			Code:    "validation_error",
+			Message: "validation failed",
+			Fields:  fields,
+		},
+	})
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/pkg/logger"
 )
 
@@ -25,7 +26,7 @@ func (m *LoggingMiddleware) Log(next http.Handler) http.Handler {
 
 		duration := time.Since(start)
 
-		requestID := r.Context().Value(RequestIDKey).(string)
+		requestID := r.Context().Value(requestctx.RequestIDKey).(string)
 
 		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
 

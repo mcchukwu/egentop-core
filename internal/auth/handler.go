@@ -1,12 +1,13 @@
-package handler
+package auth
 
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/mcchukwu/egentop/internal/apperrors"
-	"github.com/mcchukwu/egentop/internal/auth"
-	"github.com/mcchukwu/egentop/internal/middleware"
+	"github.com/mcchukwu/egentop/internal/normalize"
+	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
 	"github.com/mcchukwu/egentop/internal/validation"
 	"github.com/mcchukwu/egentop/pkg/config"
@@ -15,26 +16,35 @@ import (
 var cfg = config.Load()
 
 type AuthHandler struct {
-	AuthService *auth.AuthService
+	AuthService *AuthService
 }
 
-func NewAuthHandler(authService *auth.AuthService) *AuthHandler {
+func NewAuthHandler(authService *AuthService) *AuthHandler {
 	return &AuthHandler{AuthService: authService}
 }
 
 // Register creates a new user account
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	var req RegisterRequest
+
 	// Decode request
-	var req auth.RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.HandleError(w, apperrors.ErrInvalidRequestBody)
 		return
 	}
 
+	// Normalize phone number
+	req.Phone = normalize.NigerianPhone(req.Phone)
+
+	// Business rules
+	if req.Email == "" && req.Phone == "" {
+		response.Error(w, http.StatusBadRequest, "email_or_phone_is_required", "email or phone is required")
+		return
+	}
+
 	// Validate request
-	validationErrors := validation.ValidateRegisterRequest(req)
-	if validationErrors.HasErrors() {
-		response.ValidationError(w, validationErrors)
+	if err := validation.ValidateStruct(req); err != nil {
+		response.ValidationError(w, err)
 		return
 	}
 
@@ -53,16 +63,20 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 // Login validates the user credentials and returns a JWT access token
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Decode request
-	var req auth.LoginRequest
+	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.HandleError(w, apperrors.ErrInvalidRequestBody)
 		return
 	}
 
+	// Normalize if identifier is a phone number
+	if strings.HasPrefix(req.Identifier, "0") || strings.HasPrefix(req.Identifier, "234") || strings.HasPrefix(req.Identifier, "+") {
+		req.Identifier = normalize.NigerianPhone(req.Identifier)
+	}
+
 	// Validate request
-	validationErrors := validation.ValidateLoginRequest(req)
-	if validationErrors.HasErrors() {
-		response.ValidationError(w, validationErrors)
+	if err := validation.ValidateStruct(req); err != nil {
+		response.ValidationError(w, err)
 		return
 	}
 
@@ -125,7 +139,7 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 // Logout invalidates the session
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	// Get session id
-	sessionID, ok := r.Context().Value(middleware.SessionIDKey).(string)
+	sessionID, ok := r.Context().Value(requestctx.SessionIDKey).(string)
 	if !ok {
 		response.HandleError(w, apperrors.ErrExpiredToken)
 		return
@@ -154,7 +168,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 // LogoutAllDevices revokes all sessions for a user
 func (h *AuthHandler) LogoutAllDevices(w http.ResponseWriter, r *http.Request) {
 	// Find user
-	userID, ok := r.Context().Value(middleware.UserIDKey).(string)
+	userID, ok := r.Context().Value(requestctx.UserIDKey).(string)
 	if !ok {
 		response.HandleError(w, apperrors.ErrUserNotFound)
 		return

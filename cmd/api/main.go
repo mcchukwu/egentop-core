@@ -13,6 +13,7 @@ import (
 	"github.com/mcchukwu/egentop/internal/handler"
 	"github.com/mcchukwu/egentop/internal/middleware"
 	"github.com/mcchukwu/egentop/internal/org"
+	"github.com/mcchukwu/egentop/internal/validation"
 	"github.com/mcchukwu/egentop/pkg/config"
 	"github.com/mcchukwu/egentop/pkg/db"
 	"github.com/mcchukwu/egentop/pkg/logger"
@@ -24,6 +25,8 @@ func main() {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
+
+	validation.Init()
 
 	mux := http.NewServeMux()
 
@@ -54,10 +57,10 @@ func main() {
 
 	// Configure services and handlers
 	authService := auth.NewAuthService(db.DB, []byte(cfg.JWTSecret))
-	authHandler := handler.NewAuthHandler(authService)
+	authHandler := auth.NewAuthHandler(authService)
 
 	orgService := org.NewOrgService(db.DB)
-	orgHandler := handler.NewOrgHandler(orgService)
+	orgHandler := org.NewOrgHandler(orgService)
 
 	membershipHandler := handler.NewMembershipHandler(orgService)
 
