@@ -13,6 +13,7 @@ import (
 	"github.com/mcchukwu/egentop/internal/handler"
 	"github.com/mcchukwu/egentop/internal/middleware"
 	"github.com/mcchukwu/egentop/internal/org"
+	"github.com/mcchukwu/egentop/internal/project"
 	"github.com/mcchukwu/egentop/internal/validation"
 	"github.com/mcchukwu/egentop/pkg/config"
 	"github.com/mcchukwu/egentop/pkg/db"
@@ -64,8 +65,13 @@ func main() {
 
 	membershipHandler := handler.NewMembershipHandler(orgService)
 
+	projectRepo := project.NewProjectRepository(db.DB)
+	projectService := project.NewProjectService(projectRepo)
+	projectHandler := project.NewProjectHandler(projectService)
+
 	// Protected routes
 	mux.Handle("GET /v1/me", authMiddleware.RequireAuth(http.HandlerFunc(handler.MeHandler)))
+	mux.Handle("POST /v1/auth/refresh", authMiddleware.RequireAuth(refreshLimiterMiddleware.Limit(http.HandlerFunc(authHandler.RefreshToken))))
 	mux.Handle("POST /v1/auth/logout", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.Logout)))
 	mux.Handle("POST /v1/auth/logout-all", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.LogoutAllDevices)))
 
@@ -78,10 +84,13 @@ func main() {
 	mux.Handle("PATCH /v1/orgs/{orgID}/members/{userID}", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleOwner)(http.HandlerFunc(membershipHandler.UpdateOrgMemberRole))))))
 	mux.Handle("DELETE /v1/orgs/{orgID}/members/{userID}", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleOwner)(http.HandlerFunc(membershipHandler.RemoveOrgMember))))))
 
+	// Projects
+	mux.Handle("POST /v1/orgs/{orgID}/projects", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleAdmin)(http.HandlerFunc(projectHandler.CreateProject))))))
+	mux.Handle("GET /v1/orgs/{orgID}/projects", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(http.HandlerFunc(projectHandler.ListProjects)))))
+
 	// Other routes
 	mux.Handle("POST /v1/auth/register", registerLimiterMiddleware.Limit(http.HandlerFunc(authHandler.Register)))
 	mux.Handle("POST /v1/auth/login", loginLimiterMiddleware.Limit(http.HandlerFunc(authHandler.Login)))
-	mux.Handle("POST /v1/auth/refresh", refreshLimiterMiddleware.Limit(http.HandlerFunc(authHandler.RefreshToken)))
 
 	// Health check route (for load balancers)
 	healthHandler := handler.NewHealthHandler(db.DB)
