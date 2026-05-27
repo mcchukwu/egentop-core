@@ -1,6 +1,15 @@
 -- EXTENSIONS
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+-- Shared functions
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- USERS (global identity)
 CREATE TABLE users (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -25,6 +34,19 @@ CREATE TABLE users (
     CHECK (email IS NOT NULL OR phone IS NOT NULL)
 );
 
+-- USER TRIGGERS
+CREATE TRIGGER users_updated_at
+BEFORE UPDATE ON users
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+-- USER INDEXES
+CREATE INDEX idx_users_email
+ON users(email);
+
+CREATE INDEX idx_users_phone
+ON users(phone);
+
 -- ORGANIZATIONS (tenant root)
 CREATE TABLE organizations (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -38,6 +60,12 @@ CREATE TABLE organizations (
     created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- ORGANIZATION TRIGGERS
+CREATE TRIGGER organizations_updated_at
+BEFORE UPDATE ON organizations
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
 
 -- MEMBERSHIPS (multi-tenancy bridge)
 CREATE TABLE memberships (
@@ -57,6 +85,13 @@ CREATE TABLE memberships (
     UNIQUE(user_id, organization_id)
 );
 
+-- MEMBERSIP INDEXES
+CREATE INDEX idx_memberships_user_org
+ON memberships(user_id, organization_id);
+
+CREATE UNIQUE INDEX idx_unique_membership
+ON memberships(user_id, organization_id);
+
 -- SESSIONS (auth + device tracking)
 CREATE TABLE sessions (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -74,6 +109,10 @@ CREATE TABLE sessions (
     expires_at          TIMESTAMP NOT NULL,
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- SESSION INDEXES
+CREATE INDEX idx_sessions_user_id
+ON sessions(user_id);
 
 -- AUDIT LOGS (enterprise traceability)
 CREATE TABLE audit_logs (
@@ -96,21 +135,7 @@ CREATE TABLE audit_logs (
     created_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- INDEXES (performance-critical)
-CREATE INDEX idx_memberships_user_org
-ON memberships(user_id, organization_id);
-
-CREATE UNIQUE INDEX idx_unique_membership
-ON memberships(user_id, organization_id);
-
-CREATE INDEX idx_sessions_user_id
-ON sessions(user_id);
-
+-- AUDIT LOG INDEXES
 CREATE INDEX idx_audit_logs_org_created
 ON audit_logs(organization_id, created_at);
 
-CREATE INDEX idx_users_email
-ON users(email);
-
-CREATE INDEX idx_users_phone
-ON users(phone);

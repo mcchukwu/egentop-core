@@ -3,3 +3,4 @@ DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS memberships;
 DROP TABLE IF EXISTS organizations;
 DROP TABLE IF EXISTS users;
+DROP FUNCTION IF EXISTS update_updated_at_column;

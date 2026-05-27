@@ -149,7 +149,7 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, stri
 			return err
 		}
 
-		// Create sessiong and Store session
+		// Create session and Store session
 		var sessionID string
 
 		err = tx.QueryRowContext(dbCtx, `
