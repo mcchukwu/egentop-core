@@ -32,10 +32,10 @@ func NewAuthService(db *sql.DB, secret []byte) *AuthService {
 
 // Register creates a new user account
 func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
-	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
-		dbCtx, cancel := db.WithDBTimeout(ctx)
-		defer cancel()
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
 
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		// Hash password
 		hashedPassword, err := hashPassword(req.Password)
 		if err != nil {
@@ -109,10 +109,10 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, stri
 	var accessToken string
 	var refreshToken string
 
-	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
-		dbCtx, cancel := db.WithDBTimeout(ctx)
-		defer cancel()
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
 
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		var userID string
 		var passwordHash string
 
@@ -203,10 +203,10 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 	var newAccessToken string
 	var newRefreshToken string
 
-	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
-		dbCtx, cancel := db.WithDBTimeout(ctx)
-		defer cancel()
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
 
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		// Find session
 		rows, err := tx.QueryContext(dbCtx, `
 			SELECT id, refresh_token_hash, user_id
@@ -319,10 +319,10 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 
 // Logout revokes sessions for a user's device
 func (s *AuthService) Logout(ctx context.Context, sessionID string) error {
-	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
-		dbCtx, cancel := db.WithDBTimeout(ctx)
-		defer cancel()
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
 
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		// Revoke session
 		var userID string
 		_, err := tx.ExecContext(dbCtx, `
@@ -358,10 +358,10 @@ func (s *AuthService) Logout(ctx context.Context, sessionID string) error {
 
 // LogoutAllDevices revokes all sessions for a user
 func (s *AuthService) LogoutAllDevices(ctx context.Context, userID string) error {
-	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
-		dbCtx, cancel := db.WithDBTimeout(ctx)
-		defer cancel()
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
 
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(dbCtx, `
 		UPDATE sessions
 		SET revoked = true,

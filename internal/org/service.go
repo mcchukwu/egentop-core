@@ -79,6 +79,7 @@ func (s *OrgService) GetUserOrg(ctx context.Context, userID string) ([]Membershi
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		// Find user rows in memberships table
 		rows, err := tx.QueryContext(dbCtx, `
 		SELECT user_id, organization_id, role, status, created_at
 		FROM memberships
@@ -90,6 +91,7 @@ func (s *OrgService) GetUserOrg(ctx context.Context, userID string) ([]Membershi
 
 		defer rows.Close()
 
+		// Loop through rows and populate memberships
 		for rows.Next() {
 			var m Membership
 
@@ -118,6 +120,7 @@ func (s *OrgService) GetOrgMembers(ctx context.Context, orgID string) ([]Members
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		// Find org rows in memberships table
 		rows, err := tx.QueryContext(dbCtx, `
 			SELECT
 				user_id,
@@ -208,7 +211,7 @@ func (s *OrgService) RemoveOrgMember(ctx context.Context, orgID string, userID s
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		var role Role
 
-		// Get actor role
+		// Get user role
 		err := tx.QueryRowContext(dbCtx, `
 		SELECT role
 		FROM memberships
@@ -219,7 +222,7 @@ func (s *OrgService) RemoveOrgMember(ctx context.Context, orgID string, userID s
 			return apperrors.ErrInternalServer
 		}
 
-		// Check if actor is owner
+		// Check if user is the owner and stop it
 		if role == RoleOwner {
 			return apperrors.ErrForbidden
 		}
@@ -263,6 +266,7 @@ func (s *OrgService) UpdateOrgMemberRole(ctx context.Context, orgID string, user
 
 		var currentRole Role
 
+		// Get user role
 		err := tx.QueryRowContext(dbCtx, `
 		SELECT role
 		FROM memberships
@@ -278,6 +282,7 @@ func (s *OrgService) UpdateOrgMemberRole(ctx context.Context, orgID string, user
 			return apperrors.ErrForbidden
 		}
 
+		// Update role
 		_, err = tx.ExecContext(dbCtx, `
 		UPDATE memberships
 		SET role = $1

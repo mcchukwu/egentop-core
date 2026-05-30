@@ -146,3 +146,98 @@ func (r *ProjectRepository) UpdateMilestoneStatus(ctx context.Context, tx *sql.T
 
 	return nil
 }
+
+// GetMilestoneByID gets a milestone by ID
+func (r *ProjectRepository) GetMilestoneByID(ctx context.Context, db *sql.DB, milestoneID string) (*Milestone, error) {
+	query := `
+		SELECT
+			id,
+			project_id,
+			organization_id,
+			title,
+			description,
+			status,
+			due_date,
+			created_by,
+			created_at,
+			updated_at
+		FROM milestones
+		WHERE id = $1
+	`
+
+	milestone := &Milestone{}
+
+	err := db.QueryRowContext(ctx, query, milestoneID).Scan(&milestone.ID, &milestone.ProjectID, &milestone.OrganizationID, &milestone.Title, &milestone.Description, &milestone.Status, &milestone.DueDate, &milestone.CreatedBy, &milestone.CreatedAt, &milestone.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, apperrors.ErrMilestoneNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return milestone, nil
+}
+
+// GetByID gets a project by ID
+func (r *ProjectRepository) GetProjectByIDAndOrganization(ctx context.Context, db *sql.DB, projectID string, organizationID string) (*Project, error) {
+	query := `
+		SELECT
+			id,
+			organization_id,
+			name,
+			description,
+			status,
+			priority,
+			created_by,
+			due_date,
+			created_at,
+			updated_at
+		FROM projects
+		WHERE id = $1
+		AND organization_id = $2
+	`
+
+	project := &Project{}
+
+	err := db.QueryRowContext(ctx, query, projectID, organizationID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.CreatedAt, &project.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, apperrors.ErrProjectNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return project, nil
+}
+
+// GetMilestoneByIDAndOrganization gets a milestone by ID and organization ID
+func (r *ProjectRepository) GetMilestoneByIDAndOrganization(ctx context.Context, db *sql.DB, milestoneID string, organizationID string) (*Milestone, error) {
+	query := `
+		SELECT
+			id,
+			project_id,
+			organization_id,
+			title,
+			description,
+			status,
+			due_date,
+			created_by,
+			created_at,
+			updated_at
+		FROM milestones
+		WHERE id = $1
+		AND organization_id = $2
+	`
+
+	milestone := &Milestone{}
+
+	err := db.QueryRowContext(ctx, query, milestoneID, organizationID).Scan(&milestone.ID, &milestone.ProjectID, &milestone.OrganizationID, &milestone.Title, &milestone.Description, &milestone.Status, &milestone.DueDate, &milestone.CreatedBy, &milestone.CreatedAt, &milestone.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, apperrors.ErrMilestoneNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return milestone, nil
+}

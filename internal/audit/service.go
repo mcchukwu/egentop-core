@@ -5,7 +5,6 @@ import (
 	"database/sql"
 
 	"github.com/mcchukwu/egentop/internal/apperrors"
-	"github.com/mcchukwu/egentop/pkg/db"
 )
 
 type AuditService struct {
@@ -19,10 +18,7 @@ func NewAuditService(dbConn *sql.DB) *AuditService {
 }
 
 func (s *AuditService) Log(ctx context.Context, tx *sql.Tx, entry LogEntry) error {
-	dbCtx, cancel := db.WithDBTimeout(ctx)
-	defer cancel()
-
-	_, err := tx.ExecContext(dbCtx, `
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO audit_logs (organization_id, user_id, action, metadata)
 		VALUES ($1, $2, $3, $4)
 	`, entry.OrganizationID, entry.UserID, entry.Action, entry.Metadata)
