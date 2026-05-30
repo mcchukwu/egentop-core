@@ -24,14 +24,15 @@ func NewOrgService(db *sql.DB) *OrgService {
 func (s *OrgService) CreateOrg(ctx context.Context, name string, slug string, ownerID string) (string, error) {
 	var orgID string
 
-	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
-		dbCtx, cancel := db.WithDBTimeout(ctx)
-		defer cancel()
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
 
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		if name == "" || slug == "" {
 			return apperrors.ErrInvalidRequestBody
 		}
 
+		// Create organization and return orgID
 		err := tx.QueryRowContext(dbCtx, `
 		INSERT INTO organizations (name, slug, status, created_at, updated_at)
 		VALUES ($1, $2, 'active', NOW(), NOW())
@@ -41,7 +42,7 @@ func (s *OrgService) CreateOrg(ctx context.Context, name string, slug string, ow
 			return apperrors.ErrInternalServer
 		}
 
-		// Owner membership (critical bootstrap step)
+		// Create owner membership
 		_, err = tx.ExecContext(dbCtx, `
 		INSERT INTO memberships (user_id, organization_id, role, status, created_at)
 		VALUES ($1, $2, 'owner', 'active', NOW())
@@ -55,7 +56,7 @@ func (s *OrgService) CreateOrg(ctx context.Context, name string, slug string, ow
 			OrganizationID: &orgID,
 			UserID:         &ownerID,
 			Action:         "organization.created",
-			Metadata:       `{}`,
+			Metadata:       map[string]any{},
 		})
 		if err != nil {
 			return apperrors.ErrInternalServer
@@ -74,10 +75,10 @@ func (s *OrgService) CreateOrg(ctx context.Context, name string, slug string, ow
 func (s *OrgService) GetUserOrg(ctx context.Context, userID string) ([]Membership, error) {
 	var result []Membership
 
-	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
-		dbCtx, cancel := db.WithDBTimeout(ctx)
-		defer cancel()
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
 
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(dbCtx, `
 		SELECT user_id, organization_id, role, status, created_at
 		FROM memberships
@@ -113,10 +114,10 @@ func (s *OrgService) GetUserOrg(ctx context.Context, userID string) ([]Membershi
 func (s *OrgService) GetOrgMembers(ctx context.Context, orgID string) ([]Membership, error) {
 	var members []Membership
 
-	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
-		dbCtx, cancel := db.WithDBTimeout(ctx)
-		defer cancel()
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
 
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(dbCtx, `
 			SELECT
 				user_id,
@@ -155,14 +156,15 @@ func (s *OrgService) GetOrgMembers(ctx context.Context, orgID string) ([]Members
 
 // AddOrgMember adds a user to an organization
 func (s *OrgService) AddOrgMember(ctx context.Context, orgID string, userID string, role Role) error {
-	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
-		dbCtx, cancel := db.WithDBTimeout(ctx)
-		defer cancel()
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
 
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		if _, ok := RoleHierarchy[role]; !ok {
 			return apperrors.ErrMembershipRoleNotFound
 		}
 
+		// Add to memberships table
 		_, err := tx.ExecContext(dbCtx, `
 		INSERT INTO memberships (
 			user_id,
@@ -183,7 +185,7 @@ func (s *OrgService) AddOrgMember(ctx context.Context, orgID string, userID stri
 			OrganizationID: &orgID,
 			UserID:         &userID,
 			Action:         "membership.added",
-			Metadata:       `{}`,
+			Metadata:       map[string]any{},
 		})
 		if err != nil {
 			return apperrors.ErrInternalServer
@@ -200,12 +202,13 @@ func (s *OrgService) AddOrgMember(ctx context.Context, orgID string, userID stri
 
 // RemoveOrgMember removes a user from an organization
 func (s *OrgService) RemoveOrgMember(ctx context.Context, orgID string, userID string) error {
-	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
-		dbCtx, cancel := db.WithDBTimeout(ctx)
-		defer cancel()
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
 
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		var role Role
 
+		// Get actor role
 		err := tx.QueryRowContext(dbCtx, `
 		SELECT role
 		FROM memberships
@@ -216,11 +219,12 @@ func (s *OrgService) RemoveOrgMember(ctx context.Context, orgID string, userID s
 			return apperrors.ErrInternalServer
 		}
 
-		// protect owner account
+		// Check if actor is owner
 		if role == RoleOwner {
 			return apperrors.ErrForbidden
 		}
 
+		// Remove from memberships table
 		_, err = tx.ExecContext(dbCtx, `
 		DELETE FROM memberships
 		WHERE organization_id = $1
@@ -235,7 +239,7 @@ func (s *OrgService) RemoveOrgMember(ctx context.Context, orgID string, userID s
 			OrganizationID: &orgID,
 			UserID:         &userID,
 			Action:         "membership.removed",
-			Metadata:       `{}`,
+			Metadata:       map[string]any{},
 		})
 
 		return nil
@@ -249,10 +253,10 @@ func (s *OrgService) RemoveOrgMember(ctx context.Context, orgID string, userID s
 
 // UpdateOrgMember updates a user's role in an organization
 func (s *OrgService) UpdateOrgMemberRole(ctx context.Context, orgID string, userID string, role Role) error {
-	err := db.WithTransaction(ctx, s.DB, func(tx *sql.Tx) error {
-		dbCtx, cancel := db.WithDBTimeout(ctx)
-		defer cancel()
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
 
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		if _, ok := RoleHierarchy[role]; !ok {
 			return apperrors.ErrMembershipRoleNotFound
 		}
@@ -269,7 +273,7 @@ func (s *OrgService) UpdateOrgMemberRole(ctx context.Context, orgID string, user
 			return apperrors.ErrInternalServer
 		}
 
-		// owner role immutable
+		// Owner role immutable
 		if currentRole == RoleOwner {
 			return apperrors.ErrForbidden
 		}
@@ -289,7 +293,7 @@ func (s *OrgService) UpdateOrgMemberRole(ctx context.Context, orgID string, user
 			OrganizationID: &orgID,
 			UserID:         &userID,
 			Action:         "membership.role_changed",
-			Metadata:       `{}`,
+			Metadata:       map[string]any{},
 		})
 		if err != nil {
 			return apperrors.ErrInternalServer

@@ -3,6 +3,8 @@ package project
 import "time"
 
 type Status string
+type Priority string
+type MilestoneStatus string
 
 const (
 	StatusDraft     Status = "draft"
@@ -12,12 +14,16 @@ const (
 	StatusCancelled Status = "cancelled"
 )
 
-type Priority string
-
 const (
 	PriorityLow    Priority = "low"
 	PriorityMedium Priority = "medium"
 	PriorityHigh   Priority = "high"
+)
+
+const (
+	MilestoneStatusTodo       MilestoneStatus = "todo"
+	MilestoneStatusInProgress MilestoneStatus = "in_progress"
+	MilestoneStatusDone       MilestoneStatus = "done"
 )
 
 type Project struct {
@@ -31,4 +37,17 @@ type Project struct {
 	DueDate        *time.Time `json:"due_date,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+type Milestone struct {
+	ID             string
+	OrganizationID string
+	ProjectID      string
+	Title          string
+	Description    string
+	Status         MilestoneStatus
+	DueDate        *time.Time
+	CreatedBy      string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }

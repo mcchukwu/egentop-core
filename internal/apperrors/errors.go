@@ -58,6 +58,17 @@ var (
 
 	ErrInvitationPending = errors.New("invitation already pending")
 
+	// PROJECTS
+	ErrProjectNotFound = errors.New("project not found")
+
+	ErrProjectSlugExists = errors.New("project slug already exists")
+
+	ErrProjectStatusNotFound = errors.New("project status not found")
+
+	ErrProjectPriorityNotFound = errors.New("project priority not found")
+
+	ErrMilestoneNotFound = errors.New("milestone not found")
+
 	// VALIDATION
 	ErrValidation = errors.New("validation error")
 

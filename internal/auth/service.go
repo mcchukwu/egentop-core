@@ -88,7 +88,7 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
 			OrganizationID: &orgID,
 			UserID:         &userID,
 			Action:         "user.registered",
-			Metadata:       `{}`,
+			Metadata:       map[string]any{},
 		})
 		if err != nil {
 			return apperrors.ErrInternalServer
@@ -182,7 +182,7 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, stri
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
 			UserID:   &userID,
 			Action:   "user.logged_in",
-			Metadata: `{}`,
+			Metadata: map[string]any{},
 		})
 		if err != nil {
 			return apperrors.ErrInternalServer
@@ -302,7 +302,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
 			UserID:   &userID,
 			Action:   "token.refreshed",
-			Metadata: `{}`,
+			Metadata: map[string]any{},
 		})
 		if err != nil {
 			return apperrors.ErrInternalServer
@@ -341,7 +341,7 @@ func (s *AuthService) Logout(ctx context.Context, sessionID string) error {
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
 			UserID:   &userID,
 			Action:   "user.logged_out",
-			Metadata: `{}`,
+			Metadata: map[string]any{},
 		})
 		if err != nil {
 			return apperrors.ErrInternalServer
@@ -379,7 +379,7 @@ func (s *AuthService) LogoutAllDevices(ctx context.Context, userID string) error
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
 			UserID:   &userID,
 			Action:   "user.logged_out_all_devices",
-			Metadata: `{}`,
+			Metadata: map[string]any{},
 		})
 		if err != nil {
 			return apperrors.ErrInternalServer

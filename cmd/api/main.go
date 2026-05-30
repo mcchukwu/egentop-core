@@ -65,7 +65,7 @@ func main() {
 
 	membershipHandler := handler.NewMembershipHandler(orgService)
 
-	projectRepo := project.NewProjectRepository(db.DB)
+	projectRepo := project.NewProjectRepository()
 	projectService := project.NewProjectService(projectRepo)
 	projectHandler := project.NewProjectHandler(projectService)
 
