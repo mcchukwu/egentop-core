@@ -41,6 +41,25 @@ func Error(w http.ResponseWriter, status int, code string, message string) {
 	})
 }
 
+func ValidationError(w http.ResponseWriter, fields map[string]string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	w.WriteHeader(http.StatusBadRequest)
+
+	json.NewEncoder(w).Encode(ValidationErrorResponse{
+		Success: false,
+		Error: struct {
+			Code    string            `json:"code"`
+			Message string            `json:"message"`
+			Fields  map[string]string `json:"fields"`
+		}{
+			Code:    "validation_error",
+			Message: "validation failed",
+			Fields:  fields,
+		},
+	})
+}
+
 func HandleError(w http.ResponseWriter, err error) {
 	switch {
 	// AUTH
@@ -81,23 +100,4 @@ func HandleError(w http.ResponseWriter, err error) {
 	default:
 		Error(w, http.StatusInternalServerError, "internal_server_error", "internal server error")
 	}
-}
-
-func ValidationError(w http.ResponseWriter, fields map[string]string) {
-	w.Header().Set("Content-Type", "application/json")
-
-	w.WriteHeader(http.StatusBadRequest)
-
-	json.NewEncoder(w).Encode(ValidationErrorResponse{
-		Success: false,
-		Error: struct {
-			Code    string            `json:"code"`
-			Message string            `json:"message"`
-			Fields  map[string]string `json:"fields"`
-		}{
-			Code:    "validation_error",
-			Message: "validation failed",
-			Fields:  fields,
-		},
-	})
 }

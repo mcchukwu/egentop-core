@@ -25,6 +25,8 @@ func (h *ProjectHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// TODO: Validate request
+
 	orgID, ok := requestctx.OrganizationID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrUnauthorized)
@@ -60,4 +62,21 @@ func (h *ProjectHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Success(w, http.StatusOK, "projects fetched", projects)
+}
+
+// GetProjectByID gets a project by ID - /projects/{id}
+func (h *ProjectHandler) GetProjectByID(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := requestctx.ProjectID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	project, err := h.Service.GetProjectByID(r.Context(), projectID)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "project fetched", project)
 }

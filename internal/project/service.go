@@ -50,6 +50,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, organizationID strin
 			}
 		}
 
+		// Create project
 		if err := s.Repo.Create(dbCtx, tx, project); err != nil {
 			return err
 		}
@@ -71,12 +72,15 @@ func (s *ProjectService) ListProjects(ctx context.Context, organizationID string
 	return s.Repo.ListByOrganization(dbCtx, s.DB, organizationID)
 }
 
+func (s *ProjectService) GetProjectByID(ctx context.Context, projectID string) (*Project, error) {
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
+
+	return s.Repo.GetProjectByID(dbCtx, s.DB, projectID)
+}
+
 // UpdateProjectStatus updates the status of a project
 func (s *ProjectService) UpdateProjectStatus(ctx context.Context, userID string, organizationID string, actor org.Membership, projectID string, status Status) error {
-	if !canManageProjects(actor.Role) {
-		return apperrors.ErrForbidden
-	}
-
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -93,18 +97,21 @@ func (s *ProjectService) UpdateProjectStatus(ctx context.Context, userID string,
 			return err
 		}
 
+		// Update project status
 		err = s.Repo.UpdateStatus(dbCtx, tx, projectID, status)
 		if err != nil {
 			return err
 		}
 
+		// Audit log
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
 			OrganizationID: &actor.OrganizationID,
 			UserID:         &actor.ID,
 			Action:         "project.status_changed",
 			Metadata: map[string]any{
 				"project_id": project.ID,
-				"status":     status,
+				"old_status": project.Status,
+				"new_status": status,
 			},
 		})
 		if err != nil {
@@ -122,10 +129,6 @@ func (s *ProjectService) UpdateProjectStatus(ctx context.Context, userID string,
 
 // CreateMilestone creates a new milestone
 func (s *ProjectService) CreateMilestone(ctx context.Context, actor org.Membership, input CreateMilestoneInput) (*Milestone, error) {
-	if !canManageProjects(actor.Role) {
-		return nil, apperrors.ErrForbidden
-	}
-
 	milestone := &Milestone{
 		ProjectID:      input.ProjectID,
 		OrganizationID: actor.OrganizationID,
@@ -140,16 +143,19 @@ func (s *ProjectService) CreateMilestone(ctx context.Context, actor org.Membersh
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		// Verify if project belong to actor organization
 		project, err := s.ensureProjectAccess(dbCtx, input.ProjectID, actor.OrganizationID)
 		if err != nil {
 			return apperrors.ErrForbidden
 		}
 
+		// Create Milestone
 		err = s.Repo.CreateMilestone(dbCtx, tx, milestone)
 		if err != nil {
 			return err
 		}
 
+		// Audit log
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
 			OrganizationID: &actor.OrganizationID,
 			UserID:         &actor.UserID,
@@ -172,24 +178,55 @@ func (s *ProjectService) CreateMilestone(ctx context.Context, actor org.Membersh
 	return milestone, nil
 }
 
+// ListMilestones lists all milestones for a project
+func (s *ProjectService) ListMilestones(ctx context.Context, projectID string) ([]Milestone, error) {
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
+
+	return s.Repo.ListMilestonesByProject(dbCtx, s.DB, projectID)
+}
+
+// GetMilestoneByID gets a milestone by ID
+func (s *ProjectService) GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error) {
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
+
+	return s.Repo.GetMilestoneByID(dbCtx, s.DB, milestoneID)
+}
+
 // UpdateMilestoneStatus updates the status of a milestone
 func (s *ProjectService) UpdateMilestoneStatus(ctx context.Context, actor org.Membership, milestoneID string, status MilestoneStatus) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		err := s.Repo.UpdateMilestoneStatus(dbCtx, tx, milestoneID, status)
+		// Verify if milestone belong to actor organization
+		milestone, err := s.ensureMilestoneAccess(dbCtx, milestoneID, actor.OrganizationID)
 		if err != nil {
 			return err
 		}
 
+		// Validate status transition
+		err = validateMilestoneStatusTransition(milestone.Status, status)
+		if err != nil {
+			return err
+		}
+
+		// Update milestone status
+		err = s.Repo.UpdateMilestoneStatus(dbCtx, tx, milestone.ID, status)
+		if err != nil {
+			return err
+		}
+
+		// Audit log
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
 			OrganizationID: &actor.OrganizationID,
 			UserID:         &actor.UserID,
 			Action:         "milestone.status_changed",
 			Metadata: map[string]any{
-				"milestone_id": milestoneID,
-				"status":       status,
+				"milestone_id": milestone.ID,
+				"old_status":   milestone.Status,
+				"new_status":   status,
 			},
 		})
 		if err != nil {
@@ -227,23 +264,52 @@ func (s *ProjectService) ensureMilestoneAccess(ctx context.Context, milestoneID 
 	return milestone, nil
 }
 
-// Ensure user role is allowed to manage projects
-func canManageProjects(role org.Role) bool {
-	switch role {
-	case org.RoleOwner, org.RoleAdmin:
-		return true
-	default:
-		return false
-	}
-}
-
 // Validate the transition between project statuses
 func validateProjectStatusTransition(current Status, next Status) error {
-	switch current {
-	case StatusArchived:
-		return apperrors.ErrForbidden
-
-	default:
+	if current == next {
 		return nil
 	}
+
+	switch current {
+	case StatusDraft:
+		if next == StatusActive ||
+			next == StatusArchived {
+			return nil
+		}
+	case StatusActive:
+		if next == StatusCompleted ||
+			next == StatusArchived {
+			return nil
+		}
+	case StatusCompleted:
+		if next == StatusArchived {
+			return nil
+		}
+	case StatusArchived:
+		return apperrors.ErrForbidden
+	}
+
+	return apperrors.ErrInvalidStatusTransition
+}
+
+// Validate the transition between milestone statuses
+func validateMilestoneStatusTransition(current MilestoneStatus, next MilestoneStatus) error {
+	if current == next {
+		return nil
+	}
+
+	switch current {
+	case MilestoneStatusTodo:
+		if next == MilestoneStatusInProgress {
+			return nil
+		}
+	case MilestoneStatusInProgress:
+		if next == MilestoneStatusDone {
+			return nil
+		}
+	case MilestoneStatusDone:
+		return apperrors.ErrForbidden
+	}
+
+	return apperrors.ErrInvalidStatusTransition
 }

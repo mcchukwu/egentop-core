@@ -21,3 +21,11 @@ func WithRequestID(ctx context.Context, requestID string) context.Context {
 func WithMembershipID(ctx context.Context, membershipID any) context.Context {
 	return set(ctx, MembershipIDKey, membershipID)
 }
+
+func WithProjectID(ctx context.Context, projectID string) context.Context {
+	return set(ctx, ProjectIDKey, projectID)
+}
+
+func WithMilestoneID(ctx context.Context, milestoneID string) context.Context {
+	return set(ctx, MilestoneIDKey, milestoneID)
+}

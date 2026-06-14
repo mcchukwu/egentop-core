@@ -39,11 +39,12 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
 		// Hash password
 		hashedPassword, err := hashPassword(req.Password)
 		if err != nil {
-			return err
+			return apperrors.ErrInternalServer
 		}
 
-		// Create user
+		// Create user and get the new user ID
 		var userID string
+
 		err = tx.QueryRowContext(dbCtx, `
 		INSERT INTO users (email, phone, password_hash, first_name, last_name)
 		VALUES ($1, $2, $3, $4, $5)
@@ -53,22 +54,24 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
 			if strings.Contains(err.Error(), "users_email_key") {
 				return apperrors.ErrEmailAlreadyExists
 			}
+			if strings.Contains(err.Error(), "users_phone_key") {
+				return apperrors.ErrPhoneAlreadyExists
+			}
 
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
 		// Create organization
+		// TODO: Create random default slug upon organization creation
 		var orgID string
+
 		err = tx.QueryRowContext(dbCtx, `
 		INSERT INTO organizations (name)
 		VALUES ($1)
 		RETURNING id
 	`, fmt.Sprintf("%s's Organization", req.FirstName)).Scan(&orgID)
 		if err != nil {
-			if strings.Contains(err.Error(), "organizations_name_key") {
-				return apperrors.ErrOrganizationSlugExists
-			}
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
 		// Create membership (owner)
@@ -77,10 +80,7 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
 		VALUES ($1, $2, $3, $4)
 	`, userID, orgID, "owner", "active")
 		if err != nil {
-			if strings.Contains(err.Error(), "memberships_user_id_organization_id_key") {
-				return apperrors.ErrAlreadyMember
-			}
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
 		// Audit log
@@ -88,17 +88,19 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
 			OrganizationID: &orgID,
 			UserID:         &userID,
 			Action:         "user.registered",
+			EntityType:     "user",
+			EntityID:       &userID,
 			Metadata:       map[string]any{},
 		})
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return err
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		return apperrors.ErrInternalServer
+		return err
 	}
 
 	return nil
@@ -124,9 +126,9 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, stri
 		`, req.Identifier).Scan(&userID, &passwordHash)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return errors.New("user not found")
+				return apperrors.ErrUserNotFound
 			}
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
 		// Verify password
@@ -139,14 +141,14 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, stri
 		refreshTokenBytes := make([]byte, 32)
 		_, err = rand.Read(refreshTokenBytes)
 		if err != nil {
-			return err
+			return apperrors.ErrInternalServer
 		}
 
 		refreshToken = hex.EncodeToString(refreshTokenBytes)
 
 		hashedRefreshToken, err := hashRefreshToken(refreshToken)
 		if err != nil {
-			return err
+			return apperrors.ErrInternalServer
 		}
 
 		// Create session and Store session
@@ -162,7 +164,7 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, stri
 			time.Now().Add(30*24*time.Hour),
 		).Scan(&sessionID)
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
 		// Create JWT access token
@@ -175,24 +177,26 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, stri
 		// Sign JWT
 		accessToken, err = token.SignedString(s.JWTSecret)
 		if err != nil {
-			return err
+			return apperrors.ErrInternalServer
 		}
 
 		// Audit Log
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
-			UserID:   &userID,
-			Action:   "user.logged_in",
-			Metadata: map[string]any{},
+			UserID:     &userID,
+			Action:     "user.logged_in",
+			EntityType: "user",
+			EntityID:   &userID,
+			Metadata:   map[string]any{},
 		})
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return err
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		return "", "", apperrors.ErrInternalServer
+		return "", "", err
 	}
 
 	return accessToken, refreshToken, nil
@@ -214,10 +218,10 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 			WHERE revoked = false
 	`)
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
-		// Loop through sessions
+		// Loop through sessions and find refresh token
 		defer rows.Close()
 
 		var sessionID string
@@ -251,7 +255,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 	`,
 			sessionID)
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
 		// Create new refresh token
@@ -259,7 +263,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 
 		_, err = rand.Read(refreshBytes)
 		if err != nil {
-			return err
+			return apperrors.ErrInternalServer
 		}
 
 		newRefreshToken = hex.EncodeToString(refreshBytes)
@@ -267,7 +271,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 		// Hash new refresh token
 		newRefreshTokenHash, err := hashRefreshToken(newRefreshToken)
 		if err != nil {
-			return err
+			return apperrors.ErrInternalServer
 		}
 
 		// Create new session
@@ -282,7 +286,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 			time.Now().Add(30*24*time.Hour),
 		).Scan(&newSessionID)
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
 		// Issue new JWT access token
@@ -295,23 +299,25 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 		// Sign access token
 		newAccessToken, err = newToken.SignedString(s.JWTSecret)
 		if err != nil {
-			return err
+			return apperrors.ErrInternalServer
 		}
 
 		// Audit Log
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
-			UserID:   &userID,
-			Action:   "token.refreshed",
-			Metadata: map[string]any{},
+			UserID:     &userID,
+			Action:     "token.refreshed",
+			EntityType: "user",
+			EntityID:   &userID,
+			Metadata:   map[string]any{},
 		})
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return err
 		}
 
 		return nil
 	})
 	if err != nil {
-		return "", "", apperrors.ErrInternalServer
+		return "", "", err
 	}
 
 	return newAccessToken, newRefreshToken, nil
@@ -334,23 +340,25 @@ func (s *AuthService) Logout(ctx context.Context, sessionID string) error {
 	`,
 			sessionID)
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
 		// Audit Log
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
-			UserID:   &userID,
-			Action:   "user.logged_out",
-			Metadata: map[string]any{},
+			UserID:     &userID,
+			Action:     "user.logged_out",
+			EntityType: "user",
+			EntityID:   &userID,
+			Metadata:   map[string]any{},
 		})
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return err
 		}
 
 		return nil
 	})
 	if err != nil {
-		return apperrors.ErrInternalServer
+		return err
 	}
 
 	return nil
@@ -372,23 +380,25 @@ func (s *AuthService) LogoutAllDevices(ctx context.Context, userID string) error
 			userID,
 		)
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
 		// Audit Log
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
-			UserID:   &userID,
-			Action:   "user.logged_out_all_devices",
-			Metadata: map[string]any{},
+			UserID:     &userID,
+			Action:     "user.logged_out_all_devices",
+			EntityType: "user",
+			EntityID:   &userID,
+			Metadata:   map[string]any{},
 		})
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return err
 		}
 
 		return nil
 	})
 	if err != nil {
-		return apperrors.ErrInternalServer
+		return err
 	}
 
 	return nil

@@ -36,12 +36,6 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// Normalize phone number
 	req.Phone = normalize.NigerianPhone(req.Phone)
 
-	// Business rules
-	if req.Email == "" && req.Phone == "" {
-		response.Error(w, http.StatusBadRequest, "email_or_phone_is_required", "email or phone is required")
-		return
-	}
-
 	// Validate request
 	if err := validation.ValidateStruct(req); err != nil {
 		response.ValidationError(w, err)
@@ -55,9 +49,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return response
-	response.Created(w, map[string]string{
-		"message": "user created",
-	})
+	response.Success(w, http.StatusOK, "registration successful", nil)
 }
 
 // Login validates the user credentials and returns a JWT access token
@@ -99,7 +91,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Return response
-	response.OK(w, map[string]any{
+	response.Success(w, http.StatusOK, "login successful", map[string]any{
 		"access_token": accessToken,
 	})
 }
@@ -131,7 +123,7 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Return new access token
-	response.OK(w, map[string]any{
+	response.Success(w, http.StatusOK, "login successful", map[string]any{
 		"access_token": accessToken,
 	})
 }
@@ -162,7 +154,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Return response
-	response.NoContent(w)
+	response.Success(w, http.StatusNoContent, "logout successful", nil)
 }
 
 // LogoutAllDevices revokes all sessions for a user
@@ -191,5 +183,5 @@ func (h *AuthHandler) LogoutAllDevices(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Return response
-	response.NoContent(w)
+	response.Success(w, http.StatusNoContent, "logout successful", nil)
 }

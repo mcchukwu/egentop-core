@@ -20,5 +20,5 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 		"user_id":       userID,
 	}
 
-	response.OK(w, resp)
+	response.Success(w, http.StatusOK, "user found", resp)
 }

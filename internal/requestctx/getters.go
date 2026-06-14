@@ -39,7 +39,7 @@ func OrganizationID(ctx context.Context) (string, bool) {
 	}
 
 	s, ok := val.(string)
-	return s, true
+	return s, ok
 }
 
 func MembershipID(ctx context.Context) (string, bool) {
@@ -49,5 +49,25 @@ func MembershipID(ctx context.Context) (string, bool) {
 	}
 
 	s, ok := val.(string)
-	return s, true
+	return s, ok
+}
+
+func ProjectID(ctx context.Context) (string, bool) {
+	val, ok := get(ctx, ProjectIDKey)
+	if !ok {
+		return "", false
+	}
+
+	s, ok := val.(string)
+	return s, ok
+}
+
+func MilestoneID(ctx context.Context) (string, bool) {
+	val, ok := get(ctx, MilestoneIDKey)
+	if !ok {
+		return "", false
+	}
+
+	s, ok := val.(string)
+	return s, ok
 }

@@ -23,7 +23,7 @@ func (s *AuditService) Log(ctx context.Context, tx *sql.Tx, entry LogEntry) erro
 		VALUES ($1, $2, $3, $4)
 	`, entry.OrganizationID, entry.UserID, entry.Action, entry.Metadata)
 	if err != nil {
-		return apperrors.ErrInternalServer
+		return apperrors.ErrDatabase
 	}
 
 	return nil

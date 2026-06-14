@@ -75,6 +75,37 @@ func (r *ProjectRepository) ListByOrganization(ctx context.Context, db *sql.DB, 
 	return projects, nil
 }
 
+// GetProjectByID gets a project by ID
+func (r *ProjectRepository) GetProjectByID(ctx context.Context, db *sql.DB, projectID string) (*Project, error) {
+	query := `
+		SELECT
+			id,
+			organization_id,
+			name,
+			description,
+			status,
+			priority,
+			created_by,
+			due_date,
+			created_at,
+			updated_at
+		FROM projects
+		WHERE id = $1
+	`
+
+	project := &Project{}
+
+	err := db.QueryRowContext(ctx, query, projectID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.CreatedAt, &project.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, apperrors.ErrProjectNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return project, nil
+}
+
 // UpdateStatus updates the status of a project
 func (r *ProjectRepository) UpdateStatus(ctx context.Context, tx *sql.Tx, projectID string, status Status) error {
 	query := `
@@ -84,9 +115,18 @@ func (r *ProjectRepository) UpdateStatus(ctx context.Context, tx *sql.Tx, projec
 			updated_at = $2
 		WHERE id = $3
 	`
-	_, err := tx.ExecContext(ctx, query, status, time.Now().UTC(), projectID)
+	result, err := tx.ExecContext(ctx, query, status, time.Now().UTC(), projectID)
 	if err != nil {
 		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return apperrors.ErrProjectNotFound
 	}
 
 	return nil
@@ -120,31 +160,49 @@ func (r *ProjectRepository) CreateMilestone(ctx context.Context, tx *sql.Tx, mil
 	return nil
 }
 
-// UpdateMilestoneStatus updates the status of a milestone
-func (r *ProjectRepository) UpdateMilestoneStatus(ctx context.Context, tx *sql.Tx, milestoneID string, status MilestoneStatus) error {
+// ListMilestonesByProject lists all milestones for a project
+func (r *ProjectRepository) ListMilestonesByProject(ctx context.Context, db *sql.DB, projectID string) ([]Milestone, error) {
+	var milestones []Milestone
+
 	query := `
-	UPDATE milestones
-	SET
-		status = $1,
-		updated_at = NOW()
-	WHERE id = $2
+		SELECT
+			id,
+			project_id,
+			organization_id,
+			title,
+			description,
+			status,
+			due_date,
+			created_by,
+			created_at,
+			updated_at
+		FROM milestones
+		WHERE project_id = $1
+		ORDER BY created_at DESC
 	`
 
-	result, err := tx.ExecContext(ctx, query, status, milestoneID)
+	rows, err := db.QueryContext(ctx, query, projectID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return err
+	defer rows.Close()
+
+	for rows.Next() {
+		var m Milestone
+
+		err := rows.Scan(&m.ID, &m.ProjectID, &m.OrganizationID, &m.Title, &m.Description, &m.Status, &m.DueDate, &m.CreatedBy, &m.CreatedAt, &m.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+
+		milestones = append(milestones, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
-	if rowsAffected == 0 {
-		return apperrors.ErrMilestoneNotFound
-	}
-
-	return nil
+	return milestones, nil
 }
 
 // GetMilestoneByID gets a milestone by ID
@@ -177,6 +235,35 @@ func (r *ProjectRepository) GetMilestoneByID(ctx context.Context, db *sql.DB, mi
 
 	return milestone, nil
 }
+
+// UpdateMilestoneStatus updates the status of a milestone
+func (r *ProjectRepository) UpdateMilestoneStatus(ctx context.Context, tx *sql.Tx, milestoneID string, status MilestoneStatus) error {
+	query := `
+	UPDATE milestones
+	SET
+		status = $1,
+		updated_at = NOW()
+	WHERE id = $2
+	`
+
+	result, err := tx.ExecContext(ctx, query, status, milestoneID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return apperrors.ErrMilestoneNotFound
+	}
+
+	return nil
+}
+
+// --- Tenant Isolation queries ---
 
 // GetByID gets a project by ID
 func (r *ProjectRepository) GetProjectByIDAndOrganization(ctx context.Context, db *sql.DB, projectID string, organizationID string) (*Project, error) {

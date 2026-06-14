@@ -34,19 +34,14 @@ func mapValidationMessage(e validator.FieldError) string {
 	switch e.Tag() {
 	case "required":
 		return "field is required"
-
 	case "email":
 		return "must be a valid email"
-
 	case "min":
 		return "value is too short"
-
 	case "max":
 		return "value is too long"
-
 	case "ngphone":
 		return "must be a valid Nigerian phone number"
-
 	case "identifier":
 		return "must be a valid email or phone number"
 

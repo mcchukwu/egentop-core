@@ -67,7 +67,25 @@ var (
 
 	ErrProjectPriorityNotFound = errors.New("project priority not found")
 
+	ErrInvalidProjectName = errors.New("invalid project name")
+
+	ErrInvalidProjectDescription = errors.New("invalid project description")
+
+	ErrInvalidProjectStatusTransition = errors.New("invalid project status transition")
+
 	ErrMilestoneNotFound = errors.New("milestone not found")
+
+	ErrInvalidMilestoneName = errors.New("invalid milestone name")
+
+	ErrInvalidMilestoneDescription = errors.New("invalid milestone description")
+
+	ErrInvalidMilestoneStatusTransition = errors.New("invalid milestone status transition")
+
+	ErrInvalidProjectPriority = errors.New("invalid project priority")
+
+	ErrInvalidMilestonePriority = errors.New("invalid milestone priority")
+
+	ErrInvalidDueDate = errors.New("invalid due date")
 
 	// VALIDATION
 	ErrValidation = errors.New("validation error")
@@ -77,6 +95,8 @@ var (
 	ErrMissingRequiredField = errors.New("missing required field")
 
 	ErrInvalidEmail = errors.New("invalid email")
+
+	ErrInvalidStatusTransition = errors.New("invalid status transition")
 
 	ErrWeakPassword = errors.New("weak password")
 
