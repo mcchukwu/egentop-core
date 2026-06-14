@@ -1,7 +1,9 @@
 # Egentop-Core
+
 Egentop-Core is a backend service for the Egentop project.
 
 ## Features
+
 - Modular Clean Architecture
 - REST API with versioning
 - JWT authentication and role-based access control
@@ -12,6 +14,7 @@ Egentop-Core is a backend service for the Egentop project.
 - Comprehensive input validation
 
 ## Tech Stack
+
 | Layer | Technology |
 |--------|------------|
 | Language | Go 1.26+ |
@@ -36,6 +39,7 @@ flowchart TD
 ## Quick Start
 
 ### Prerequisites
+
 - Go 1.26+
 - Docker
 - Docker Compose
@@ -44,8 +48,8 @@ flowchart TD
 ### Clone
 
 ```bash
-git clone https://github.com/yourusername/yourproject.git
-cd yourproject
+git clone https://github.com/mcchukwu/egentop-core.git ./egentop
+cd egentop
 ```
 
 ### Configure
@@ -78,6 +82,7 @@ deployments/   Deployment manifests and configurations.
 ```
 
 ## Documentation
+
 - [Architecture](docs/architecture.md)
 - [Development Setup](docs/development-setup.md)
 - [API Documentation](docs/api/README.md)
@@ -87,6 +92,7 @@ deployments/   Deployment manifests and configurations.
 - [Roadmap](docs/roadmap.md)
 
 ## Development Workflow
+
 1. Create a feature branch.
 2. Implement changes.
 3. Add or update tests.
@@ -94,6 +100,7 @@ deployments/   Deployment manifests and configurations.
 5. Open a pull request.
 
 ## Roadmap
+
 - [x] Core authentication
 - [x] Validation framework
 - [ ] API versioning
@@ -102,4 +109,5 @@ deployments/   Deployment manifests and configurations.
 - [ ] Web dashboard
 
 ## License
+
 This project is licensed under the MIT License. See the LICENSE file for details.
