@@ -22,6 +22,7 @@ import (
 
 func main() {
 	cfg := config.Load()
+
 	if err := cfg.Validate(); err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)

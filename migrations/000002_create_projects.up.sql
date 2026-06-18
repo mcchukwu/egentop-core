@@ -1,4 +1,7 @@
 -- PROJECT DOMAIN
+CREATE TYPE project_status AS ENUM ('draft', 'active', 'completed', 'archived', 'cancelled');
+CREATE TYPE project_priority AS ENUM ('low', 'medium', 'high');
+
 CREATE TABLE projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -14,17 +17,17 @@ CREATE TABLE projects (
 
     description TEXT,
 
-    status TEXT NOT NULL DEFAULT 'draft',
+    status project_status NOT NULL DEFAULT 'draft',
 
-    priority TEXT NOT NULL DEFAULT 'medium',
+    priority project_priority NOT NULL DEFAULT 'medium',
 
-    due_date TIMESTAMP,
+    due_date TIMESTAMPTZ,
 
-    archived_at TIMESTAMP,
+    archived_at TIMESTAMPTZ,
 
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT projects_name_length
         CHECK (char_length(name) >= 1),
@@ -82,6 +85,8 @@ CREATE INDEX idx_projects_org_created_at
 ON projects(organization_id, created_at DESC);
 
 -- MILESTONES
+CREATE TYPE milestone_status AS ENUM ('pending', 'in_progress', 'awaiting_approval', 'completed', 'blocked', 'cancelled');
+
 CREATE TABLE milestones (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -101,17 +106,17 @@ CREATE TABLE milestones (
 
     description TEXT,
 
-    status TEXT NOT NULL DEFAULT 'pending',
+    status milestone_status NOT NULL DEFAULT 'pending',
 
-    due_date TIMESTAMP,
+    due_date TIMESTAMPTZ,
 
     position INTEGER NOT NULL DEFAULT 0,
 
-    completed_at TIMESTAMP,
+    completed_at TIMESTAMPTZ,
 
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT milestones_title_length
         CHECK (char_length(title) >= 1),
@@ -187,7 +192,7 @@ CREATE TABLE assignments (
         REFERENCES users(id)
         ON DELETE RESTRICT,
 
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT assignments_target_check
         CHECK (
@@ -244,7 +249,7 @@ CREATE TABLE activities (
 
     metadata JSONB,
 
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT activities_type_length
         CHECK (char_length(type) >= 1),

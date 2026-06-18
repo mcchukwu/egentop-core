@@ -25,6 +25,7 @@ type Config struct {
 	CORSAllowedOrigins []string
 }
 
+// Load loads the config from the environment
 func Load() *Config {
 	err := godotenv.Load()
 	if err != nil {
@@ -52,6 +53,7 @@ func Load() *Config {
 	}
 }
 
+// Validate validates the config
 func (c *Config) Validate() error {
 	if c.AppEnv != "production" && c.AppEnv != "development" {
 		return errors.New("invalid app env")
@@ -80,6 +82,11 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+// getEnv returns the value of the environment variable or the fallback value
 func getEnv(key, fallback string) string {
 	val := os.Getenv(key)
 	if val == "" {

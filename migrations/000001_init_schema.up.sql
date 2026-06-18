@@ -11,6 +11,8 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- USERS (global identity)
+CREATE TYPE user_status AS ENUM ('active', 'suspended', 'deleted');
+
 CREATE TABLE users (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -22,14 +24,14 @@ CREATE TABLE users (
     first_name      TEXT,
     last_name       TEXT,
 
-    status          TEXT NOT NULL DEFAULT 'active',
+    status          user_status NOT NULL DEFAULT 'active',
     -- active | suspended | deleted
 
-    email_verified  BOOLEAN DEFAULT FALSE,
-    phone_verified  BOOLEAN DEFAULT FALSE,
+    email_verified  BOOLEAN NOT NULL DEFAULT FALSE,
+    phone_verified  BOOLEAN NOT NULL DEFAULT FALSE,
 
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CHECK (email IS NOT NULL OR phone IS NOT NULL)
 );
@@ -48,17 +50,19 @@ CREATE INDEX idx_users_phone
 ON users(phone);
 
 -- ORGANIZATIONS (tenant root)
+CREATE TYPE organization_status AS ENUM ('active', 'suspended', 'deleted');
+
 CREATE TABLE organizations (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     name            TEXT NOT NULL,
     slug            TEXT UNIQUE,
 
-    status          TEXT NOT NULL DEFAULT 'active',
+    status          organization_status NOT NULL DEFAULT 'active',
     -- active | suspended | deleted
 
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ORGANIZATION TRIGGERS
@@ -68,19 +72,22 @@ FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
 -- MEMBERSHIPS (multi-tenancy bridge)
+CREATE TYPE membership_role AS ENUM ('owner', 'admin', 'member', 'viewer');
+CREATE TYPE membership_status AS ENUM ('active', 'invited', 'suspended');
+
 CREATE TABLE memberships (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
 
-    role            TEXT NOT NULL,
+    role            membership_role NOT NULL,
     -- owner | admin | member | viewer
 
-    status          TEXT NOT NULL DEFAULT 'active',
+    status          membership_status NOT NULL DEFAULT 'active',
     -- active | invited | suspended
 
-    joined_at       TIMESTAMP DEFAULT NOW(),
+    joined_at       TIMESTAMPTZ DEFAULT NOW(),
 
     UNIQUE(user_id, organization_id)
 );
@@ -104,10 +111,10 @@ CREATE TABLE sessions (
     ip_address          TEXT,
 
     revoked             BOOLEAN DEFAULT FALSE,
-    revoked_at          TIMESTAMP,
+    revoked_at          TIMESTAMPTZ,
 
-    expires_at          TIMESTAMP NOT NULL,
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+    expires_at          TIMESTAMPTZ NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- SESSION INDEXES
@@ -132,10 +139,9 @@ CREATE TABLE audit_logs (
     ip_address      TEXT,
     user_agent      TEXT,
 
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- AUDIT LOG INDEXES
 CREATE INDEX idx_audit_logs_org_created
 ON audit_logs(organization_id, created_at);
-

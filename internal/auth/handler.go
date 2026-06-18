@@ -34,7 +34,15 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Normalize phone number
-	req.Phone = normalize.NigerianPhone(req.Phone)
+	if req.Phone != "" {
+		normalized, err := normalize.Phone(req.Phone, "")
+		if err != nil {
+			response.ValidationError(w, map[string]string{"phone": "must be a valid phone number"})
+			return
+		}
+		req.Phone = normalized
+	}
+	req.Email = normalize.Email(req.Email)
 
 	// Validate request
 	if err := validation.ValidateStruct(req); err != nil {
@@ -54,17 +62,15 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 // Login validates the user credentials and returns a JWT access token
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
-	// Decode request
 	var req LoginRequest
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.HandleError(w, apperrors.ErrInvalidRequestBody)
 		return
 	}
 
 	// Normalize if identifier is a phone number
-	if strings.HasPrefix(req.Identifier, "0") || strings.HasPrefix(req.Identifier, "234") || strings.HasPrefix(req.Identifier, "+") {
-		req.Identifier = normalize.NigerianPhone(req.Identifier)
-	}
+	req.Identifier = normalize.Identifier(req.Identifier, "")
 
 	// Validate request
 	if err := validation.ValidateStruct(req); err != nil {
