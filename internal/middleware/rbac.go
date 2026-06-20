@@ -38,8 +38,7 @@ func (m *RBACMiddleware) RequireRole(allowedRoles ...org.Role) func(http.Handler
 			var role string
 
 			err := m.DB.QueryRowContext(r.Context(), `
-			SELECT
-				role,
+			SELECT role
 			FROM memberships
 			WHERE user_id = $1
 			AND organization_id = $2

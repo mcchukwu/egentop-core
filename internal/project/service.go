@@ -22,36 +22,62 @@ func NewProjectService(repo *ProjectRepository) *ProjectService {
 }
 
 // CreateProject creates a new project
-func (s *ProjectService) CreateProject(ctx context.Context, organizationID string, createdBy string, req CreateProjectRequest) (*Project, error) {
+func (s *ProjectService) CreateProject(ctx context.Context, createdBy string, organizationID string, req CreateProjectRequest) (*Project, error) {
+	priority := ProjectPriorityMedium
+	var dueDate *time.Time
+
+	if req.Priority != "" {
+		switch ProjectPriority(req.Priority) {
+		case ProjectPriorityLow, ProjectPriorityMedium, ProjectPriorityHigh:
+			priority = ProjectPriority(req.Priority)
+
+		default:
+			return nil, apperrors.ErrValidation
+		}
+	}
+
+	if req.DueDate != nil {
+		parsed, err := time.Parse(time.RFC3339, req.DueDate.String())
+		if err != nil {
+			return nil, apperrors.ErrValidation
+		}
+
+		dueDate = &parsed
+	}
+
 	project := &Project{
 		OrganizationID: organizationID,
 		CreatedBy:      createdBy,
 		Name:           req.Name,
-		Status:         StatusDraft,
-		Priority:       PriorityMedium,
+		Status:         ProjectStatusDraft,
+		Priority:       priority,
+		DueDate:        dueDate,
+	}
+
+	if req.Description != "" {
+		project.Description = &req.Description
 	}
 
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		if req.Description != "" {
-			project.Description = &req.Description
-		}
-
-		if req.Priority != "" {
-			project.Priority = Priority(req.Priority)
-		}
-
-		if req.DueDate != "" {
-			parsed, err := time.Parse(time.RFC3339, req.DueDate)
-			if err == nil {
-				project.DueDate = &parsed
-			}
-		}
-
-		// Create project
 		if err := s.Repo.Create(dbCtx, tx, project); err != nil {
+			return err
+		}
+
+		err := s.AuditService.Log(dbCtx, tx, audit.LogEntry{
+			OrganizationID: &organizationID,
+			UserID:         &createdBy,
+			Action:         "project.created",
+			EntityType:     "project",
+			EntityID:       &project.ID,
+			Metadata: map[string]any{
+				"project_id": project.ID,
+				"name":       project.Name,
+			},
+		})
+		if err != nil {
 			return err
 		}
 
@@ -80,7 +106,7 @@ func (s *ProjectService) GetProjectByID(ctx context.Context, projectID string) (
 }
 
 // UpdateProjectStatus updates the status of a project
-func (s *ProjectService) UpdateProjectStatus(ctx context.Context, userID string, organizationID string, actor org.Membership, projectID string, status Status) error {
+func (s *ProjectService) UpdateProjectStatus(ctx context.Context, userID string, organizationID string, actor org.Membership, projectID string, status ProjectStatus) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -98,7 +124,7 @@ func (s *ProjectService) UpdateProjectStatus(ctx context.Context, userID string,
 		}
 
 		// Update project status
-		err = s.Repo.UpdateStatus(dbCtx, tx, projectID, status)
+		err = s.Repo.UpdateProjectStatus(dbCtx, tx, projectID, status)
 		if err != nil {
 			return err
 		}
@@ -128,28 +154,38 @@ func (s *ProjectService) UpdateProjectStatus(ctx context.Context, userID string,
 }
 
 // CreateMilestone creates a new milestone
-func (s *ProjectService) CreateMilestone(ctx context.Context, actor org.Membership, input CreateMilestoneInput) (*Milestone, error) {
-	milestone := &Milestone{
-		ProjectID:      input.ProjectID,
-		OrganizationID: actor.OrganizationID,
-		Title:          input.Title,
-		Description:    input.Description,
-		Status:         MilestoneStatusTodo,
-		DueDate:        input.DueDate,
-		CreatedBy:      actor.UserID,
-	}
-
+func (s *ProjectService) CreateMilestone(ctx context.Context, organizationID string, userID string, input CreateMilestoneInput) (*Milestone, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		// Verify if project belong to actor organization
-		project, err := s.ensureProjectAccess(dbCtx, input.ProjectID, actor.OrganizationID)
-		if err != nil {
-			return apperrors.ErrForbidden
-		}
+	// Validate input
+	var dueDate *time.Time
 
-		// Create Milestone
+	if input.DueDate != nil {
+		parsed, err := time.Parse(time.RFC3339, input.DueDate.String())
+		if err != nil {
+			return nil, apperrors.ErrInvalidDueDate
+		}
+		dueDate = &parsed
+	}
+
+	// Verify if project belong to actor organization
+	project, err := s.ensureProjectAccess(dbCtx, input.ProjectID, organizationID)
+	if err != nil {
+		return nil, apperrors.ErrForbidden
+	}
+
+	milestone := &Milestone{
+		OrganizationID: organizationID,
+		ProjectID:      project.ID,
+		Title:          input.Title,
+		Description:    input.Description,
+		Status:         MilestoneStatusPending,
+		CreatedBy:      userID,
+		DueDate:        dueDate,
+	}
+
+	err = db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		err = s.Repo.CreateMilestone(dbCtx, tx, milestone)
 		if err != nil {
 			return err
@@ -157,12 +193,15 @@ func (s *ProjectService) CreateMilestone(ctx context.Context, actor org.Membersh
 
 		// Audit log
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
-			OrganizationID: &actor.OrganizationID,
-			UserID:         &actor.UserID,
+			OrganizationID: &organizationID,
+			UserID:         &userID,
 			Action:         "milestone.created",
+			EntityType:     "milestone",
+			EntityID:       &milestone.ID,
 			Metadata: map[string]any{
 				"project_id":   project.ID,
 				"milestone_id": milestone.ProjectID,
+				"title":        milestone.Title,
 			},
 		})
 		if err != nil {
@@ -195,13 +234,13 @@ func (s *ProjectService) GetMilestoneByID(ctx context.Context, milestoneID strin
 }
 
 // UpdateMilestoneStatus updates the status of a milestone
-func (s *ProjectService) UpdateMilestoneStatus(ctx context.Context, actor org.Membership, milestoneID string, status MilestoneStatus) error {
+func (s *ProjectService) UpdateMilestoneStatus(ctx context.Context, orgID string, userID string, milestoneID string, status MilestoneStatus) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		// Verify if milestone belong to actor organization
-		milestone, err := s.ensureMilestoneAccess(dbCtx, milestoneID, actor.OrganizationID)
+		milestone, err := s.ensureMilestoneAccess(dbCtx, milestoneID, orgID)
 		if err != nil {
 			return err
 		}
@@ -220,9 +259,11 @@ func (s *ProjectService) UpdateMilestoneStatus(ctx context.Context, actor org.Me
 
 		// Audit log
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
-			OrganizationID: &actor.OrganizationID,
-			UserID:         &actor.UserID,
+			OrganizationID: &orgID,
+			UserID:         &userID,
 			Action:         "milestone.status_changed",
+			EntityType:     "milestone",
+			EntityID:       &milestoneID,
 			Metadata: map[string]any{
 				"milestone_id": milestone.ID,
 				"old_status":   milestone.Status,
@@ -265,28 +306,29 @@ func (s *ProjectService) ensureMilestoneAccess(ctx context.Context, milestoneID 
 }
 
 // Validate the transition between project statuses
-func validateProjectStatusTransition(current Status, next Status) error {
+func validateProjectStatusTransition(current ProjectStatus, next ProjectStatus) error {
 	if current == next {
 		return nil
 	}
 
 	switch current {
-	case StatusDraft:
-		if next == StatusActive ||
-			next == StatusArchived {
+	case ProjectStatusDraft:
+		if next == ProjectStatusActive || next == ProjectStatusArchived || next == ProjectStatusCancelled {
 			return nil
 		}
-	case StatusActive:
-		if next == StatusCompleted ||
-			next == StatusArchived {
+	case ProjectStatusActive:
+		if next == ProjectStatusCompleted || next == ProjectStatusArchived || next == ProjectStatusCancelled {
 			return nil
 		}
-	case StatusCompleted:
-		if next == StatusArchived {
+	case ProjectStatusCompleted:
+		if next == ProjectStatusArchived {
 			return nil
 		}
-	case StatusArchived:
-		return apperrors.ErrForbidden
+
+	case ProjectStatusArchived:
+		return apperrors.ErrInvalidStatusTransition
+	case ProjectStatusCancelled:
+		return apperrors.ErrInvalidStatusTransition
 	}
 
 	return apperrors.ErrInvalidStatusTransition
@@ -299,16 +341,25 @@ func validateMilestoneStatusTransition(current MilestoneStatus, next MilestoneSt
 	}
 
 	switch current {
-	case MilestoneStatusTodo:
-		if next == MilestoneStatusInProgress {
+	case MilestoneStatusPending:
+		if next == MilestoneStatusInProgress || next == MilestoneStatusCancelled || next == MilestoneStatusBlocked {
 			return nil
 		}
 	case MilestoneStatusInProgress:
-		if next == MilestoneStatusDone {
+		if next == MilestoneStatusAwaitingApproval || next == MilestoneStatusCancelled || next == MilestoneStatusBlocked {
 			return nil
 		}
-	case MilestoneStatusDone:
-		return apperrors.ErrForbidden
+	case MilestoneStatusAwaitingApproval:
+		if next == MilestoneStatusCompleted || next == MilestoneStatusCancelled || next == MilestoneStatusBlocked {
+			return nil
+		}
+
+	case MilestoneStatusCompleted:
+		return apperrors.ErrInvalidStatusTransition
+	case MilestoneStatusCancelled:
+		return apperrors.ErrInvalidStatusTransition
+	case MilestoneStatusBlocked:
+		return apperrors.ErrInvalidStatusTransition
 	}
 
 	return apperrors.ErrInvalidStatusTransition

@@ -3,27 +3,24 @@ package project
 import "time"
 
 type CreateProjectRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Priority    string `json:"priority"`
-	DueDate     string `json:"due_date"`
+	Name        string          `json:"name" validate:"required,min=3,max=120"`
+	Description string          `json:"description" validate:"max=2000"`
+	Priority    ProjectPriority `json:"priority"`
+	DueDate     *time.Time      `json:"due_date"`
 }
-
 type UpdateProjectRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Priority    string `json:"priority"`
-	Status      string `json:"status"`
+	Name        string          `json:"name" validate:"required,min=3,max=120"`
+	Description string          `json:"description" validate:"max=2000"`
+	Priority    ProjectPriority `json:"priority"`
+	Status      ProjectStatus   `json:"status"`
 }
 
 type CreateMilestoneInput struct {
-	ProjectID   string
-	Title       string
-	Description string
-	DueDate     *time.Time
+	ProjectID   string     `json:"project_id" validate:"required"`
+	Title       string     `json:"title" validate:"required,min=3,max=120"`
+	Description string     `json:"description" validate:"max=2000"`
+	DueDate     *time.Time `json:"due_date"`
 }
-
 type UpdateMilestoneStatusInput struct {
-	MilestoneID string
-	Status      MilestoneStatus
+	Status MilestoneStatus `json:"status" validate:"required"`
 }

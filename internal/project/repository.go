@@ -107,7 +107,7 @@ func (r *ProjectRepository) GetProjectByID(ctx context.Context, db *sql.DB, proj
 }
 
 // UpdateStatus updates the status of a project
-func (r *ProjectRepository) UpdateStatus(ctx context.Context, tx *sql.Tx, projectID string, status Status) error {
+func (r *ProjectRepository) UpdateProjectStatus(ctx context.Context, tx *sql.Tx, projectID string, status ProjectStatus) error {
 	query := `
 		UPDATE projects
 		SET

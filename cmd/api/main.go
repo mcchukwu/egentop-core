@@ -89,6 +89,10 @@ func main() {
 	mux.Handle("POST /v1/orgs/{orgID}/projects", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleAdmin)(http.HandlerFunc(projectHandler.CreateProject))))))
 	mux.Handle("GET /v1/orgs/{orgID}/projects", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(http.HandlerFunc(projectHandler.ListProjects)))))
 
+	// Milestones
+	mux.Handle("POST /v1/orgs/{orgID}/projects/{projectID}/milestones", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleAdmin)(http.HandlerFunc(projectHandler.CreateMilestone))))))
+	mux.Handle("GET /v1/orgs/{orgID}/projects/{projectID}/milestones", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(http.HandlerFunc(projectHandler.ListMilestones)))))
+
 	// Other routes
 	mux.Handle("POST /v1/auth/register", registerLimiterMiddleware.Limit(http.HandlerFunc(authHandler.Register)))
 	mux.Handle("POST /v1/auth/login", loginLimiterMiddleware.Limit(http.HandlerFunc(authHandler.Login)))

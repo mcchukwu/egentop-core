@@ -52,18 +52,8 @@ func MembershipID(ctx context.Context) (string, bool) {
 	return s, ok
 }
 
-func ProjectID(ctx context.Context) (string, bool) {
-	val, ok := get(ctx, ProjectIDKey)
-	if !ok {
-		return "", false
-	}
-
-	s, ok := val.(string)
-	return s, ok
-}
-
-func MilestoneID(ctx context.Context) (string, bool) {
-	val, ok := get(ctx, MilestoneIDKey)
+func Role(ctx context.Context) (string, bool) {
+	val, ok := get(ctx, RoleKey)
 	if !ok {
 		return "", false
 	}

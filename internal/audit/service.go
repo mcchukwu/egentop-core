@@ -19,9 +19,16 @@ func NewAuditService(dbConn *sql.DB) *AuditService {
 
 func (s *AuditService) Log(ctx context.Context, tx *sql.Tx, entry LogEntry) error {
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO audit_logs (organization_id, user_id, action, metadata)
+		INSERT INTO audit_logs (
+			organization_id, 
+			user_id, 
+			action, 
+			entity_type, 
+			entity_id, 
+			metadata
+		)
 		VALUES ($1, $2, $3, $4)
-	`, entry.OrganizationID, entry.UserID, entry.Action, entry.Metadata)
+	`, entry.OrganizationID, entry.UserID, entry.Action, entry.EntityType, entry.EntityID, entry.Metadata)
 	if err != nil {
 		return apperrors.ErrDatabase
 	}
