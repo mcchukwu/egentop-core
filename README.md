@@ -1,6 +1,7 @@
 # Egentop-Core
 
-Egentop-Core is a backend service for the Egentop project.
+Egentop-Core is a backend service for the Egentop project - An operational workflow infrastructure
+
 
 ## Features
 
@@ -13,18 +14,20 @@ Egentop-Core is a backend service for the Egentop project.
 - Production-ready configuration management
 - Comprehensive input validation
 
+
 ## Tech Stack
 
 | Layer | Technology |
 |--------|------------|
 | Language | Go 1.26+ |
-| HTTP Framework | Gin |
+| HTTP Framework | Mux |
 | Database | PostgreSQL |
 | ORM/SQL | sqlc / pgx |
 | Authentication | JWT |
 | Validation | go-playground/validator/v10 |
 | Containerization | Docker & Docker Compose |
 | Testing | Go testing package |
+
 
 ## Architecture
 
@@ -35,6 +38,7 @@ flowchart TD
     Service --> Repository
     Repository --> PostgreSQL
 ```
+
 
 ## Quick Start
 
@@ -70,6 +74,7 @@ docker compose up -d
 go run ./cmd/api
 ```
 
+
 ## Project Structure
 
 ```text
@@ -81,6 +86,7 @@ scripts/       Development and deployment scripts.
 deployments/   Deployment manifests and configurations.
 ```
 
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)
@@ -91,6 +97,7 @@ deployments/   Deployment manifests and configurations.
 - [Coding Standards](docs/coding-standards.md)
 - [Roadmap](docs/roadmap.md)
 
+
 ## Development Workflow
 
 1. Create a feature branch.
@@ -99,14 +106,6 @@ deployments/   Deployment manifests and configurations.
 4. Run validation and formatting.
 5. Open a pull request.
 
-## Roadmap
-
-- [x] Core authentication
-- [x] Validation framework
-- [ ] API versioning
-- [ ] Metrics and observability
-- [ ] Multi-tenant support
-- [ ] Web dashboard
 
 ## License
 
