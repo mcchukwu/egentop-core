@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 
 	"github.com/mcchukwu/egentop/internal/apperrors"
 )
@@ -18,7 +19,36 @@ func NewAuditService(dbConn *sql.DB) *AuditService {
 }
 
 func (s *AuditService) Log(ctx context.Context, tx *sql.Tx, entry LogEntry) error {
-	_, err := tx.ExecContext(ctx, `
+	if entry.OrganizationID == nil {
+		return apperrors.ErrInvalidRequestBody
+	}
+
+	if entry.UserID == nil {
+		return apperrors.ErrInvalidRequestBody
+	}
+
+	if entry.Action == "" {
+		return apperrors.ErrInvalidRequestBody
+	}
+
+	if entry.EntityType == "" {
+		return apperrors.ErrInvalidRequestBody
+	}
+
+	if entry.EntityID == nil {
+		return apperrors.ErrInvalidRequestBody
+	}
+
+	if entry.Metadata == nil {
+		entry.Metadata = map[string]any{}
+	}
+
+	metadataJSON, err := json.Marshal(entry.Metadata)
+	if err != nil {
+		return apperrors.ErrInternalServer
+	}
+
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO audit_logs (
 			organization_id, 
 			user_id, 
@@ -28,7 +58,7 @@ func (s *AuditService) Log(ctx context.Context, tx *sql.Tx, entry LogEntry) erro
 			metadata
 		)
 		VALUES ($1, $2, $3, $4)
-	`, entry.OrganizationID, entry.UserID, entry.Action, entry.EntityType, entry.EntityID, entry.Metadata)
+	`, entry.OrganizationID, entry.UserID, entry.Action, entry.EntityType, entry.EntityID, metadataJSON)
 	if err != nil {
 		return apperrors.ErrDatabase
 	}

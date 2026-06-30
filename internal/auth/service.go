@@ -24,10 +24,11 @@ type AuthService struct {
 	AuditService *audit.AuditService
 }
 
-func NewAuthService(db *sql.DB, secret []byte) *AuthService {
+func NewAuthService(db *sql.DB, secret []byte, auditService *audit.AuditService) *AuthService {
 	return &AuthService{
-		DB:        db,
-		JWTSecret: secret,
+		DB:           db,
+		JWTSecret:    secret,
+		AuditService: auditService,
 	}
 }
 

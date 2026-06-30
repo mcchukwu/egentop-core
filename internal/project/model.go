@@ -45,14 +45,16 @@ const (
 )
 
 type Milestone struct {
-	ID             string
-	OrganizationID string
-	ProjectID      string
-	Title          string
-	Description    string
-	Status         MilestoneStatus
-	DueDate        *time.Time
-	CreatedBy      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID             string          `json:"id"`
+	OrganizationID string          `json:"organization_id"`
+	ProjectID      string          `json:"project_id"`
+	CreatedBy      string          `json:"created_by"`
+	Title          string          `json:"title"`
+	Description    *string         `json:"description,omitempty"`
+	Status         MilestoneStatus `json:"status"`
+	DueDate        *time.Time      `json:"due_date,omitempty"`
+	Position       int             `json:"position"`
+	CompletedAt    *time.Time      `json:"completed_at,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }

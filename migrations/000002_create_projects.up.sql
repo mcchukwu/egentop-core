@@ -202,6 +202,14 @@ CREATE TABLE assignments (
 );
 
 -- ASSIGNMENT INDEXES
+create unique index idx_assignments_project_unique
+on assignments(project_id)
+where project_id is not null;
+
+CREATE UNIQUE INDEX idx_assignments_milestone_unique
+ON assignments(milestone_id)
+WHERE milestone_id IS NOT NULL;
+
 CREATE INDEX idx_assignments_organization_id
 ON assignments(organization_id);
 
@@ -245,9 +253,9 @@ CREATE TABLE activities (
 
     type TEXT NOT NULL,
 
-    message TEXT NOT NULL,
+    message TEXT,
 
-    metadata JSONB,
+    metadata JSONB NOT NULL,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -259,6 +267,7 @@ CREATE TABLE activities (
 );
 
 -- ACTIVITY INDEXES
+
 CREATE INDEX idx_activities_organization_id
 ON activities(organization_id);
 

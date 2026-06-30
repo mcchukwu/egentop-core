@@ -14,9 +14,10 @@ type OrgService struct {
 	AuditService *audit.AuditService
 }
 
-func NewOrgService(db *sql.DB) *OrgService {
+func NewOrgService(db *sql.DB, auditService *audit.AuditService) *OrgService {
 	return &OrgService{
-		DB: db,
+		DB:           db,
+		AuditService: auditService,
 	}
 }
 
