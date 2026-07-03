@@ -40,6 +40,8 @@ var (
 
 	ErrUserSuspended = errors.New("user suspended")
 
+	ErrUserIdentifierInvalid = errors.New("phone or email is invalid")
+
 	// ORGANIZATIONS
 	ErrOrganizationNotFound = errors.New("organization not found")
 
@@ -48,6 +50,8 @@ var (
 	ErrOrganizationDeleted = errors.New("organization deleted")
 
 	ErrOrganizationSlugExists = errors.New("organization slug already exists")
+
+	ErrOrganizationNameInvalid = errors.New("organization name is invalid")
 
 	// MEMBERSHIPS
 	ErrMembershipNotFound = errors.New("membership not found")

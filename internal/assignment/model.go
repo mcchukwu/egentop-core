@@ -3,17 +3,11 @@ package assignment
 import "time"
 
 type Assignment struct {
-	ID string
-
+	ID             string
 	OrganizationID string
-
-	ProjectID *string
-
-	MilestoneID *string
-
-	AssignedTo string
-
-	AssignedBy string
-
-	CreatedAt time.Time
+	ProjectID      *string
+	MilestoneID    *string
+	AssignedTo     string
+	AssignedBy     string
+	CreatedAt      time.Time
 }

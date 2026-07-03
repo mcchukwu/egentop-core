@@ -5,17 +5,17 @@ import (
 	"database/sql"
 )
 
-type AssignmentRepo struct {
+type AssignmentRepository struct {
 	DB *sql.DB
 }
 
-func NewAssignmentRepo(db *sql.DB) *AssignmentRepo {
-	return &AssignmentRepo{
+func NewAssignmentRepository(db *sql.DB) *AssignmentRepository {
+	return &AssignmentRepository{
 		DB: db,
 	}
 }
 
-func Create(ctx context.Context, tx sql.Tx, assignment *Assignment) (*Assignment, error) {
+func (r *AssignmentRepository) Create(ctx context.Context, tx *sql.Tx, assignment *Assignment) error {
 	query := `
 		INSERT INTO assignments (
 			organization_id,
@@ -31,8 +31,8 @@ func Create(ctx context.Context, tx sql.Tx, assignment *Assignment) (*Assignment
 
 	err := tx.QueryRowContext(ctx, query, assignment.OrganizationID, assignment.ProjectID, assignment.MilestoneID, assignment.AssignedTo, assignment.AssignedBy, assignment.CreatedAt).Scan(&assignment.ID, &assignment.CreatedAt)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return assignment, nil
+	return nil
 }

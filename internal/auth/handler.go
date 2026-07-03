@@ -41,7 +41,11 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Phone = normalized
 	}
-	req.Email = normalize.Email(req.Email)
+
+	// Normalize email
+	if req.Email != "" {
+		req.Email = normalize.Email(req.Email)
+	}
 
 	// Validate request
 	if err := validation.ValidateStruct(req); err != nil {

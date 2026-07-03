@@ -14,14 +14,19 @@ func ValidateStruct(data any) map[string]string {
 	if err == nil {
 		return nil
 	}
+
 	validationErrors := err.(validator.ValidationErrors)
+
 	fields := map[string]string{}
+
 	for _, e := range validationErrors {
 		fields[e.Field()] = mapValidationMessage(e)
 	}
+
 	return fields
 }
 
+// mapValidationMessage maps the validation error tag to a human readable message
 func mapValidationMessage(e validator.FieldError) string {
 	switch e.Tag() {
 	case "required":
@@ -40,6 +45,11 @@ func mapValidationMessage(e validator.FieldError) string {
 		return "must be a valid Nigerian phone number or email"
 	case "identifier":
 		return "must be a valid phone number or email"
+	case "uuid":
+		return "must be a valid UUID"
+	case "url":
+		return "must be a valid URL"
+
 	default:
 		return "invalid value"
 	}

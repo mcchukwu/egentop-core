@@ -87,7 +87,7 @@ CREATE TABLE memberships (
     status          membership_status NOT NULL DEFAULT 'active',
     -- active | invited | suspended
 
-    joined_at       TIMESTAMPTZ DEFAULT NOW(),
+    joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     UNIQUE(user_id, organization_id)
 );

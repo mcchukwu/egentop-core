@@ -14,6 +14,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/audit"
+	"github.com/mcchukwu/egentop/internal/org"
 	"github.com/mcchukwu/egentop/pkg/db"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -37,16 +38,20 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		// Hash password
-		hashedPassword, err := hashPassword(req.Password)
-		if err != nil {
-			return apperrors.ErrInternalServer
-		}
+	if req.Email == "" && req.Phone == "" {
+		return apperrors.ErrUserIdentifierInvalid
+	}
 
-		// Create user and get the new user ID
+	// Hash password
+	hashedPassword, err := hashPassword(req.Password)
+	if err != nil {
+		return apperrors.ErrInternalServer
+	}
+
+	err = db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		var userID string
 
+		// Create user and get the new user ID
 		err = tx.QueryRowContext(dbCtx, `
 		INSERT INTO users (email, phone, password_hash, first_name, last_name)
 		VALUES ($1, $2, $3, $4, $5)
@@ -82,7 +87,7 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
 		_, err = tx.ExecContext(dbCtx, `
 		INSERT INTO memberships (user_id, organization_id, role, status)
 		VALUES ($1, $2, $3, $4)
-	`, userID, orgID, "owner", "active")
+	`, userID, orgID, org.RoleOwner, org.StatusActive)
 		if err != nil {
 			return apperrors.ErrDatabase
 		}
@@ -103,29 +108,29 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
 		return nil
 	})
 
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 // Login validates the user credentials and returns a JWT access token
 func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, string, error) {
-	var accessToken string
-	var refreshToken string
-
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		var userID string
-		var passwordHash string
-		var status string
+	var (
+		accessToken  string
+		refreshToken string
 
-		// detect identifier type and query the right column
-		var err error
+		err error
+	)
 
+	err = db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		var (
+			userID       string
+			passwordHash string
+			status       string
+		)
+
+		// detect if identifier is email or phone, and query the right column
 		if strings.Contains(req.Identifier, "@") {
 			err = tx.QueryRowContext(dbCtx, `
                 SELECT id, password_hash, status 
@@ -178,20 +183,19 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, stri
 
 		return nil
 	})
-	if err != nil {
-		return "", "", err
-	}
 
-	return accessToken, refreshToken, nil
+	return accessToken, refreshToken, err
 }
 
 // RefreshToken refreshes the session
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (string, string, error) {
-	var newAccessToken string
-	var newRefreshToken string
-
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
+
+	var (
+		newAccessToken  string
+		newRefreshToken string
+	)
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		// Find session
@@ -312,8 +316,9 @@ func (s *AuthService) Logout(ctx context.Context, sessionID string) error {
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		// Revoke session
 		var userID string
+
+		// Revoke session
 		_, err := tx.ExecContext(dbCtx, `
 		UPDATE sessions
 		SET revoked = true,
@@ -340,11 +345,8 @@ func (s *AuthService) Logout(ctx context.Context, sessionID string) error {
 
 		return nil
 	})
-	if err != nil {
-		return err
-	}
 
-	return nil
+	return err
 }
 
 // LogoutAllDevices revokes all sessions for a user
@@ -380,11 +382,8 @@ func (s *AuthService) LogoutAllDevices(ctx context.Context, userID string) error
 
 		return nil
 	})
-	if err != nil {
-		return err
-	}
 
-	return nil
+	return err
 }
 
 // -----------------------------------------------------------------------------
@@ -427,14 +426,12 @@ func createSession(ctx context.Context, tx *sql.Tx, userID string, jwtSecret []b
 	}
 
 	var sessionID string
+
 	err = tx.QueryRowContext(ctx, `
         INSERT INTO sessions (user_id, refresh_token_hash, expires_at, revoked, created_at)
         VALUES ($1, $2, $3, false, NOW())
         RETURNING id
-    `,
-		userID,
-		string(hashedRefreshToken),
-		time.Now().Add(30*24*time.Hour),
+    `, userID, string(hashedRefreshToken), time.Now().Add(30*24*time.Hour),
 	).Scan(&sessionID)
 	if err != nil {
 		return "", "", apperrors.ErrDatabase
@@ -445,6 +442,7 @@ func createSession(ctx context.Context, tx *sql.Tx, userID string, jwtSecret []b
 		"session_id": sessionID,
 		"exp":        time.Now().Add(15 * time.Minute).Unix(),
 	})
+
 	accessToken, err = token.SignedString(jwtSecret)
 	if err != nil {
 		return "", "", apperrors.ErrInternalServer

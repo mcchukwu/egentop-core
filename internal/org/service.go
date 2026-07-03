@@ -28,28 +28,30 @@ func (s *OrgService) CreateOrg(ctx context.Context, name string, slug string, ow
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		if name == "" || slug == "" {
-			return apperrors.ErrInvalidRequestBody
-		}
+	if name == "" {
+		return "", apperrors.ErrOrganizationNameInvalid
+	}
 
+	//TODO: Generate unique organization slug upon creation attempt
+
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		// Create organization and return orgID
 		err := tx.QueryRowContext(dbCtx, `
 		INSERT INTO organizations (name, slug, status, created_at, updated_at)
-		VALUES ($1, $2, 'active', NOW(), NOW())
+		VALUES ($1, $2, $3, NOW(), NOW())
 		RETURNING id
-		`, name, slug).Scan(&orgID)
+		`, nullableString(slug), StatusActive).Scan(&orgID)
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
 		// Create owner membership
 		_, err = tx.ExecContext(dbCtx, `
 		INSERT INTO memberships (user_id, organization_id, role, status, created_at)
-		VALUES ($1, $2, 'owner', 'active', NOW())
-		`, ownerID, orgID)
+		VALUES ($1, $2, $3, $4, NOW())
+		`, ownerID, orgID, RoleOwner, StatusActive)
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
 		// Audit Log
@@ -57,22 +59,21 @@ func (s *OrgService) CreateOrg(ctx context.Context, name string, slug string, ow
 			OrganizationID: &orgID,
 			UserID:         &ownerID,
 			Action:         "organization.created",
+			EntityType:     "organization",
+			EntityID:       &orgID,
 			Metadata:       map[string]any{},
 		})
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return err
 		}
 
 		return nil
 	})
-	if err != nil {
-		return "", apperrors.ErrInternalServer
-	}
 
-	return orgID, nil
+	return orgID, err
 }
 
-// GetUserOrg returns all organizations a user belongs to
+// GetUserOrg returns all organizations an active user belongs to
 func (s *OrgService) GetUserOrg(ctx context.Context, userID string) ([]Membership, error) {
 	var result []Membership
 
@@ -98,7 +99,7 @@ func (s *OrgService) GetUserOrg(ctx context.Context, userID string) ([]Membershi
 
 			err := rows.Scan(&m.UserID, &m.OrganizationID, &m.Role, &m.Status, &m.CreatedAt)
 			if err != nil {
-				return err
+				return apperrors.ErrInternalServer
 			}
 
 			result = append(result, m)
@@ -106,11 +107,8 @@ func (s *OrgService) GetUserOrg(ctx context.Context, userID string) ([]Membershi
 
 		return nil
 	})
-	if err != nil {
-		return nil, apperrors.ErrInternalServer
-	}
 
-	return result, nil
+	return result, err
 }
 
 // GetOrgMembers returns all members of an organization
@@ -143,7 +141,7 @@ func (s *OrgService) GetOrgMembers(ctx context.Context, orgID string) ([]Members
 
 			err := rows.Scan(&m.UserID, &m.OrganizationID, &m.Role, &m.Status, &m.CreatedAt)
 			if err != nil {
-				return err
+				return apperrors.ErrInternalServer
 			}
 
 			members = append(members, m)
@@ -151,11 +149,8 @@ func (s *OrgService) GetOrgMembers(ctx context.Context, orgID string) ([]Members
 
 		return nil
 	})
-	if err != nil {
-		return nil, apperrors.ErrInternalServer
-	}
 
-	return members, nil
+	return members, err
 }
 
 // AddOrgMember adds a user to an organization
@@ -189,6 +184,8 @@ func (s *OrgService) AddOrgMember(ctx context.Context, orgID string, userID stri
 			OrganizationID: &orgID,
 			UserID:         &userID,
 			Action:         "membership.added",
+			EntityType:     "organization",
+			EntityID:       &orgID,
 			Metadata:       map[string]any{},
 		})
 		if err != nil {
@@ -312,4 +309,16 @@ func (s *OrgService) UpdateOrgMemberRole(ctx context.Context, orgID string, user
 	}
 
 	return nil
+}
+
+// ---------------------------------
+// --------- Helpers ---------------
+// ---------------------------------
+
+// nullableString returns a pointer to the string if it's not empty
+func nullableString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

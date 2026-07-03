@@ -11,6 +11,15 @@ const (
 	RoleViewer Role = "viewer"
 )
 
+type Organization struct {
+	ID        string
+	Name      string
+	Slug      string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type MembershipStatus string
 
 const (
@@ -26,13 +35,4 @@ type Membership struct {
 	Role           Role
 	Status         MembershipStatus
 	CreatedAt      time.Time
-}
-
-type Organization struct {
-	ID        string
-	Name      string
-	Slug      string
-	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
 }
