@@ -99,15 +99,6 @@ deployments/   Deployment manifests and configurations.
 4. Run validation and formatting.
 5. Open a pull request.
 
-## Roadmap
-
-- [x] Core authentication
-- [x] Validation framework
-- [ ] API versioning
-- [ ] Metrics and observability
-- [ ] Multi-tenant support
-- [ ] Web dashboard
-
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for details.
