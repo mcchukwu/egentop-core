@@ -154,17 +154,19 @@ func (s *OrgService) GetOrgMembers(ctx context.Context, orgID string) ([]Members
 }
 
 // AddOrgMember adds a user to an organization
-func (s *OrgService) AddOrgMember(ctx context.Context, orgID string, userID string, role Role) error {
+func (s *OrgService) AddOrgMember(ctx context.Context, orgID string, actorID string, userID string, userRole Role) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		if _, ok := RoleHierarchy[role]; !ok {
+		if _, ok := RoleHierarchy[userRole]; !ok {
 			return apperrors.ErrMembershipRoleNotFound
 		}
 
+		var membershipID string
+
 		// Add to memberships table
-		_, err := tx.ExecContext(dbCtx, `
+		err := tx.QueryRowContext(dbCtx, `
 		INSERT INTO memberships (
 			user_id,
 			organization_id,
@@ -173,8 +175,10 @@ func (s *OrgService) AddOrgMember(ctx context.Context, orgID string, userID stri
 			created_at
 		)
 		VALUES ($1, $2, $3, $4, NOW())
-	`,
-			userID, orgID, role, StatusActive)
+		RETURNING id
+		`,
+			userID, orgID, userRole, StatusActive,
+		).Scan(&membershipID)
 		if err != nil {
 			return apperrors.ErrInternalServer
 		}
@@ -182,66 +186,75 @@ func (s *OrgService) AddOrgMember(ctx context.Context, orgID string, userID stri
 		// Audit Log
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
 			OrganizationID: &orgID,
-			UserID:         &userID,
+			UserID:         &actorID,
 			Action:         "membership.added",
-			EntityType:     "organization",
-			EntityID:       &orgID,
-			Metadata:       map[string]any{},
+			EntityType:     "membership",
+			EntityID:       &membershipID,
+			Metadata: map[string]any{
+				"new_member_id": &userID,
+			},
 		})
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return err
 		}
 
 		return nil
 	})
-	if err != nil {
-		return apperrors.ErrInternalServer
-	}
 
-	return nil
+	return err
 }
 
 // RemoveOrgMember removes a user from an organization
-func (s *OrgService) RemoveOrgMember(ctx context.Context, orgID string, userID string) error {
+func (s *OrgService) RemoveOrgMember(ctx context.Context, orgID string, actorID string, userID string) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+
+		// Get user role and ensure it's not owner
 		var role Role
 
-		// Get user role
 		err := tx.QueryRowContext(dbCtx, `
 		SELECT role
 		FROM memberships
 		WHERE organization_id = $1
 		AND user_id = $2
-	`, orgID, userID).Scan(&role)
+	`, orgID, actorID).Scan(&role)
 		if err != nil {
 			return apperrors.ErrInternalServer
 		}
 
-		// Check if user is the owner and stop it
 		if role == RoleOwner {
 			return apperrors.ErrForbidden
 		}
 
 		// Remove from memberships table
-		_, err = tx.ExecContext(dbCtx, `
+		var membershipID string
+
+		err = tx.QueryRowContext(dbCtx, `
 		DELETE FROM memberships
 		WHERE organization_id = $1
 		AND user_id = $2
-	`, orgID, userID)
+		RETURNING id
+	`, orgID, userID).Scan(&membershipID)
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
 		// Audit Log
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
 			OrganizationID: &orgID,
-			UserID:         &userID,
+			UserID:         &actorID,
 			Action:         "membership.removed",
-			Metadata:       map[string]any{},
+			EntityType:     "membership",
+			EntityID:       &membershipID,
+			Metadata: map[string]any{
+				"removed_member_id": &userID,
+			},
 		})
+		if err != nil {
+			return err
+		}
 
 		return nil
 	})
@@ -253,40 +266,42 @@ func (s *OrgService) RemoveOrgMember(ctx context.Context, orgID string, userID s
 }
 
 // UpdateOrgMember updates a user's role in an organization
-func (s *OrgService) UpdateOrgMemberRole(ctx context.Context, orgID string, userID string, role Role) error {
+func (s *OrgService) UpdateOrgMemberRole(ctx context.Context, orgID string, actorID string, userID string, newRole Role) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		if _, ok := RoleHierarchy[role]; !ok {
+		if _, ok := RoleHierarchy[newRole]; !ok {
 			return apperrors.ErrMembershipRoleNotFound
 		}
 
+		// Get user current role and ensure it's not owner
 		var currentRole Role
 
-		// Get user role
 		err := tx.QueryRowContext(dbCtx, `
 		SELECT role
 		FROM memberships
 		WHERE organization_id = $1
 		AND user_id = $2
-	`, orgID, userID).Scan(&currentRole)
+		`, orgID, userID).Scan(&currentRole)
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return apperrors.ErrDatabase
 		}
 
-		// Owner role immutable
 		if currentRole == RoleOwner {
 			return apperrors.ErrForbidden
 		}
 
 		// Update role
-		_, err = tx.ExecContext(dbCtx, `
+		var membershipID string
+
+		err = tx.QueryRowContext(dbCtx, `
 		UPDATE memberships
 		SET role = $1
 		WHERE organization_id = $2
 		AND user_id = $3
-	`, role, orgID, userID)
+		RETURNING id
+		`, newRole, orgID, userID).Scan(&membershipID)
 		if err != nil {
 			return apperrors.ErrInternalServer
 		}
@@ -294,21 +309,24 @@ func (s *OrgService) UpdateOrgMemberRole(ctx context.Context, orgID string, user
 		// Audit Log
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
 			OrganizationID: &orgID,
-			UserID:         &userID,
+			UserID:         &actorID,
 			Action:         "membership.role_changed",
-			Metadata:       map[string]any{},
+			EntityType:     "membership",
+			EntityID:       &membershipID,
+			Metadata: map[string]any{
+				"user_id":  &userID,
+				"old_role": currentRole,
+				"new_role": newRole,
+			},
 		})
 		if err != nil {
-			return apperrors.ErrInternalServer
+			return err
 		}
 
 		return nil
 	})
-	if err != nil {
-		return apperrors.ErrInternalServer
-	}
 
-	return nil
+	return err
 }
 
 // ---------------------------------

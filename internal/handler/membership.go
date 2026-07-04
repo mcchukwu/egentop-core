@@ -27,6 +27,12 @@ func (h *MembershipHandler) AddOrgMember(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUserNotFound)
+		return
+	}
+
 	var req org.AddMemberRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -40,7 +46,7 @@ func (h *MembershipHandler) AddOrgMember(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	err := h.OrgService.AddOrgMember(r.Context(), organizationID, req.UserID, req.Role)
+	err := h.OrgService.AddOrgMember(r.Context(), organizationID, userID, req.UserID, req.Role)
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return
@@ -56,6 +62,12 @@ func (h *MembershipHandler) UpdateOrgMemberRole(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUserNotFound)
+		return
+	}
+
 	targetUserID := r.PathValue("userID")
 
 	var req org.UpdateMemberRoleRequest
@@ -65,7 +77,7 @@ func (h *MembershipHandler) UpdateOrgMemberRole(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	err := h.OrgService.UpdateOrgMemberRole(r.Context(), organizationID, targetUserID, req.Role)
+	err := h.OrgService.UpdateOrgMemberRole(r.Context(), organizationID, userID, targetUserID, req.Role)
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return
@@ -81,9 +93,15 @@ func (h *MembershipHandler) RemoveOrgMember(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUserNotFound)
+		return
+	}
+
 	targetUserID := r.PathValue("userID")
 
-	err := h.OrgService.RemoveOrgMember(r.Context(), organizationID, targetUserID)
+	err := h.OrgService.RemoveOrgMember(r.Context(), organizationID, userID, targetUserID)
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return
