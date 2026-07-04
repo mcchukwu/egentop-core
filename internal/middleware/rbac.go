@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/mcchukwu/egentop/internal/apperrors"
-	"github.com/mcchukwu/egentop/internal/org"
+	"github.com/mcchukwu/egentop/internal/membership"
 	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
 )
@@ -20,7 +20,7 @@ func NewRBACMiddleware(db *sql.DB) *RBACMiddleware {
 	}
 }
 
-func (m *RBACMiddleware) RequireRole(allowedRoles ...org.Role) func(http.Handler) http.Handler {
+func (m *RBACMiddleware) RequireRole(allowedRoles ...membership.Role) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			userID, ok := requestctx.UserID(r.Context())
@@ -55,12 +55,12 @@ func (m *RBACMiddleware) RequireRole(allowedRoles ...org.Role) func(http.Handler
 				return
 			}
 
-			userRoleLevel := org.RoleHierarchy[org.Role(role)]
+			userRoleLevel := membership.RoleHierarchy[membership.Role(role)]
 
 			allowed := false
 
 			for _, role := range allowedRoles {
-				requiredRoleLevel := org.RoleHierarchy[role]
+				requiredRoleLevel := membership.RoleHierarchy[role]
 
 				if userRoleLevel >= requiredRoleLevel {
 					allowed = true

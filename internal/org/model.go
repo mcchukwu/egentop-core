@@ -2,37 +2,19 @@ package org
 
 import "time"
 
-type Role string
+type OrganizationStatus string
 
 const (
-	RoleOwner  Role = "owner"
-	RoleAdmin  Role = "admin"
-	RoleMember Role = "member"
-	RoleViewer Role = "viewer"
+	OrganizationStatusActive    OrganizationStatus = "active"
+	OrganizationStatusSuspended OrganizationStatus = "suspended"
+	OrganizationStatusDeleted   OrganizationStatus = "deleted"
 )
 
 type Organization struct {
 	ID        string
 	Name      string
 	Slug      string
-	Status    string
+	Status    OrganizationStatus
 	CreatedAt time.Time
 	UpdatedAt time.Time
-}
-
-type MembershipStatus string
-
-const (
-	StatusActive    MembershipStatus = "active"
-	StatusInvited   MembershipStatus = "invited"
-	StatusSuspended MembershipStatus = "suspended"
-)
-
-type Membership struct {
-	ID             string
-	UserID         string
-	OrganizationID string
-	Role           Role
-	Status         MembershipStatus
-	CreatedAt      time.Time
 }

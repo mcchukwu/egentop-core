@@ -29,7 +29,7 @@ func (h *OrgHandler) CreateOrgs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: Validate request properly
-	if req.Name == "" || req.Slug == "" {
+	if req.Name == "" {
 		response.HandleError(w, apperrors.ErrValidation)
 		return
 	}
@@ -65,20 +65,4 @@ func (h *OrgHandler) GetOrgs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Success(w, http.StatusOK, "organizations fetched", orgs)
-}
-
-func (h *OrgHandler) GetOrgMembers(w http.ResponseWriter, r *http.Request) {
-	orgID, ok := requestctx.OrganizationID(r.Context())
-	if !ok {
-		response.HandleError(w, apperrors.ErrInternalServer)
-		return
-	}
-
-	members, err := h.OrgService.GetOrgMembers(r.Context(), orgID)
-	if err != nil {
-		response.HandleError(w, apperrors.ErrInternalServer)
-		return
-	}
-
-	response.Success(w, http.StatusOK, "members fetched", members)
 }

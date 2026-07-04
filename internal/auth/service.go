@@ -14,7 +14,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/audit"
-	"github.com/mcchukwu/egentop/internal/org"
+	"github.com/mcchukwu/egentop/internal/membership"
 	"github.com/mcchukwu/egentop/pkg/db"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -87,7 +87,7 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
 		_, err = tx.ExecContext(dbCtx, `
 		INSERT INTO memberships (user_id, organization_id, role, status)
 		VALUES ($1, $2, $3, $4)
-	`, userID, orgID, org.RoleOwner, org.StatusActive)
+	`, userID, orgID, membership.RoleOwner, membership.MembershipStatusActive)
 		if err != nil {
 			return apperrors.ErrDatabase
 		}

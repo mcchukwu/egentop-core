@@ -100,11 +100,8 @@ func (s *ProjectService) Create(ctx context.Context, createdBy string, organizat
 
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
 
-	return project, nil
+	return project, err
 }
 
 // ListProjects lists all projects for an organization
@@ -173,11 +170,8 @@ func (s *ProjectService) UpdateStatus(ctx context.Context, userID string, organi
 
 		return nil
 	})
-	if err != nil {
-		return err
-	}
 
-	return nil
+	return err
 }
 
 // CreateMilestone creates a new milestone
@@ -249,11 +243,8 @@ func (s *ProjectService) CreateMilestone(ctx context.Context, organizationID str
 
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
 
-	return milestone, nil
+	return milestone, err
 }
 
 // ListMilestones lists all milestones for a project
@@ -325,11 +316,8 @@ func (s *ProjectService) UpdateMilestoneStatus(ctx context.Context, orgID string
 
 		return nil
 	})
-	if err != nil {
-		return err
-	}
 
-	return nil
+	return err
 }
 
 // --- Helpers ---
@@ -337,21 +325,15 @@ func (s *ProjectService) UpdateMilestoneStatus(ctx context.Context, orgID string
 // Eusure project is accessible by the user
 func (s *ProjectService) ensureProjectAccess(ctx context.Context, projectID string, organizationID string) (*Project, error) {
 	project, err := s.Repo.GetProjectByIDAndOrganizationID(ctx, projectID, organizationID)
-	if err != nil {
-		return nil, err
-	}
 
-	return project, nil
+	return project, err
 }
 
 // Ensure milestone is accessible by the user
 func (s *ProjectService) ensureMilestoneAccess(ctx context.Context, milestoneID string, organizationID string) (*Milestone, error) {
 	milestone, err := s.Repo.GetMilestoneByIDAndOrganizationID(ctx, milestoneID, organizationID)
-	if err != nil {
-		return nil, err
-	}
 
-	return milestone, nil
+	return milestone, err
 }
 
 // Validate the transition between project statuses

@@ -13,6 +13,7 @@ import (
 	"github.com/mcchukwu/egentop/internal/audit"
 	"github.com/mcchukwu/egentop/internal/auth"
 	"github.com/mcchukwu/egentop/internal/handler"
+	"github.com/mcchukwu/egentop/internal/membership"
 	"github.com/mcchukwu/egentop/internal/middleware"
 	"github.com/mcchukwu/egentop/internal/org"
 	"github.com/mcchukwu/egentop/internal/project"
@@ -71,7 +72,8 @@ func main() {
 	orgService := org.NewOrgService(db.DB, auditService)
 	orgHandler := org.NewOrgHandler(orgService)
 
-	membershipHandler := handler.NewMembershipHandler(orgService)
+	membershipService := membership.NewMembershipService(db.DB, auditService)
+	membershipHandler := membership.NewMembershipHandler(membershipService)
 
 	projectRepo := project.NewProjectRepository(db.DB)
 	projectService := project.NewProjectService(db.DB, projectRepo, auditService, activityService)
@@ -88,18 +90,18 @@ func main() {
 	mux.Handle("GET /v1/orgs/{orgID}", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.GetOrgs)))
 
 	// RBAC on organizations
-	mux.Handle("GET /v1/orgs/{orgID}/members", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleAdmin, org.RoleOwner)(http.HandlerFunc(orgHandler.GetOrgMembers))))))
-	mux.Handle("POST /v1/orgs/{orgID}/members", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleAdmin, org.RoleOwner)(http.HandlerFunc(membershipHandler.AddOrgMember))))))
-	mux.Handle("PATCH /v1/orgs/{orgID}/members/{userID}", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleOwner)(http.HandlerFunc(membershipHandler.UpdateOrgMemberRole))))))
-	mux.Handle("DELETE /v1/orgs/{orgID}/members/{userID}", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleOwner)(http.HandlerFunc(membershipHandler.RemoveOrgMember))))))
+	mux.Handle("GET /v1/orgs/{orgID}/members", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(membership.RoleAdmin, membership.RoleOwner)(http.HandlerFunc(membershipHandler.GetOrgMembers))))))
+	mux.Handle("POST /v1/orgs/{orgID}/members", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(membership.RoleAdmin, membership.RoleOwner)(http.HandlerFunc(membershipHandler.AddOrgMember))))))
+	mux.Handle("PATCH /v1/orgs/{orgID}/members/{userID}", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(membership.RoleOwner)(http.HandlerFunc(membershipHandler.UpdateOrgMemberRole))))))
+	mux.Handle("DELETE /v1/orgs/{orgID}/members/{userID}", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(membership.RoleOwner)(http.HandlerFunc(membershipHandler.RemoveOrgMember))))))
 
 	// Projects
-	mux.Handle("POST /v1/orgs/{orgID}/projects", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleAdmin)(http.HandlerFunc(projectHandler.Create))))))
+	mux.Handle("POST /v1/orgs/{orgID}/projects", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(membership.RoleAdmin)(http.HandlerFunc(projectHandler.Create))))))
 	mux.Handle("GET /v1/orgs/{orgID}/projects", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(http.HandlerFunc(projectHandler.ListProjectsByOrganizationID)))))
 	mux.Handle("GET /v1/orgs/{orgID}/projects/{projectID}", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(http.HandlerFunc(projectHandler.GetProjectByID)))))
 
 	// Milestones
-	mux.Handle("POST /v1/orgs/{orgID}/projects/{projectID}/milestones", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(org.RoleAdmin)(http.HandlerFunc(projectHandler.CreateMilestone))))))
+	mux.Handle("POST /v1/orgs/{orgID}/projects/{projectID}/milestones", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(membership.RoleAdmin)(http.HandlerFunc(projectHandler.CreateMilestone))))))
 	mux.Handle("GET /v1/orgs/{orgID}/projects/{projectID}/milestones", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(http.HandlerFunc(projectHandler.ListMilestonesByProjectID)))))
 
 	// Public routes
