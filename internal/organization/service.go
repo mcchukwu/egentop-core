@@ -1,4 +1,4 @@
-package org
+package organization
 
 import (
 	"context"
@@ -10,24 +10,24 @@ import (
 	"github.com/mcchukwu/egentop/pkg/db"
 )
 
-type OrgService struct {
-	DB           *sql.DB
-	AuditService *audit.AuditService
+type OrganizationService struct {
+	DB    *sql.DB
+	Audit *audit.AuditService
 }
 
-func NewOrgService(db *sql.DB, auditService *audit.AuditService) *OrgService {
-	return &OrgService{
-		DB:           db,
-		AuditService: auditService,
+func NewOrganizationService(db *sql.DB, audit *audit.AuditService) *OrganizationService {
+	return &OrganizationService{
+		DB:    db,
+		Audit: audit,
 	}
 }
 
-// CreateOrg creates a new organization
-func (s *OrgService) CreateOrg(ctx context.Context, name string, slug string, ownerID string) (string, error) {
-	var orgID string
-
+// CreateOrganization creates a new organization
+func (s *OrganizationService) CreateOrganization(ctx context.Context, name string, slug string, ownerID string) (string, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
+
+	var orgID string
 
 	if name == "" {
 		return "", apperrors.ErrOrganizationNameInvalid
@@ -56,7 +56,7 @@ func (s *OrgService) CreateOrg(ctx context.Context, name string, slug string, ow
 		}
 
 		// Audit Log
-		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
+		err = s.Audit.Log(dbCtx, tx, audit.LogEntry{
 			OrganizationID: &orgID,
 			UserID:         &ownerID,
 			Action:         "organization.created",
@@ -75,11 +75,11 @@ func (s *OrgService) CreateOrg(ctx context.Context, name string, slug string, ow
 }
 
 // GetUserOrg returns all organizations an active user belongs to
-func (s *OrgService) GetUserOrg(ctx context.Context, userID string) ([]membership.Membership, error) {
-	var result []membership.Membership
-
+func (s *OrganizationService) GetUserOrganizations(ctx context.Context, userID string) ([]membership.Membership, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
+
+	var result []membership.Membership
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		// Find user rows in memberships table
@@ -104,6 +104,35 @@ func (s *OrgService) GetUserOrg(ctx context.Context, userID string) ([]membershi
 			}
 
 			result = append(result, m)
+		}
+
+		return nil
+	})
+
+	return result, err
+}
+
+func (s *OrganizationService) GetOrganizationByID(ctx context.Context, userID string, orgID string) (*Organization, error) {
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
+
+	var result *Organization
+
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		err := tx.QueryRowContext(dbCtx,
+			`SELECT
+				id,
+				name,
+				slug,
+				status,
+				created_at,
+				updated_at
+			FROM organizations
+			WHERE id = $1
+			AND status = 'active'
+		`, orgID).Scan(&result.ID, &result.Name, &result.Slug, &result.Status, &result.CreatedAt, &result.UpdatedAt)
+		if err != nil {
+			return apperrors.ErrDatabase
 		}
 
 		return nil

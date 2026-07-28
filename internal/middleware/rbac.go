@@ -51,7 +51,7 @@ func (m *RBACMiddleware) RequireRole(allowedRoles ...membership.Role) func(http.
 					return
 				}
 
-				response.HandleError(w, apperrors.ErrInternalServer)
+				response.HandleError(w, apperrors.ErrDatabase)
 				return
 			}
 

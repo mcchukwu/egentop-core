@@ -20,32 +20,38 @@ import (
 )
 
 type AuthService struct {
-	DB           *sql.DB
-	JWTSecret    []byte
-	AuditService *audit.AuditService
+	DB        *sql.DB
+	JWTSecret []byte
+	Audit     *audit.AuditService
 }
 
-func NewAuthService(db *sql.DB, secret []byte, auditService *audit.AuditService) *AuthService {
+func NewAuthService(db *sql.DB, secret []byte, audit *audit.AuditService) *AuthService {
 	return &AuthService{
-		DB:           db,
-		JWTSecret:    secret,
-		AuditService: auditService,
+		DB:        db,
+		JWTSecret: secret,
+		Audit:     audit,
 	}
 }
 
-// Register creates a new user account
-func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
+// Register creates a new user account and returns an active session
+func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (string, string, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
+	var (
+		accessToken, refreshToken string
+		err                       error
+	)
+
+	// Validate identifier
 	if req.Email == "" && req.Phone == "" {
-		return apperrors.ErrUserIdentifierInvalid
+		return "", "", apperrors.ErrUserIdentifierInvalid
 	}
 
 	// Hash password
 	hashedPassword, err := hashPassword(req.Password)
 	if err != nil {
-		return apperrors.ErrInternalServer
+		return "", "", apperrors.ErrInternalServer
 	}
 
 	err = db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
@@ -92,8 +98,14 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
 			return apperrors.ErrDatabase
 		}
 
+		// Create session (auto-login)
+		accessToken, refreshToken, err = createSession(dbCtx, tx, userID, s.JWTSecret)
+		if err != nil {
+			return err
+		}
+
 		// Audit log
-		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
+		err = s.Audit.Log(dbCtx, tx, audit.LogEntry{
 			OrganizationID: &orgID,
 			UserID:         &userID,
 			Action:         "user.registered",
@@ -108,7 +120,7 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) error {
 		return nil
 	})
 
-	return err
+	return accessToken, refreshToken, err
 }
 
 // Login validates the user credentials and returns a JWT access token
@@ -117,20 +129,14 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, stri
 	defer cancel()
 
 	var (
-		accessToken  string
-		refreshToken string
-
-		err error
+		accessToken, refreshToken string
+		err                       error
 	)
 
 	err = db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		var (
-			userID       string
-			passwordHash string
-			status       string
-		)
+		// detect if identifier is email or phone, query the right column and scan into userID, passwordHash, and status
+		var userID, passwordHash, status string
 
-		// detect if identifier is email or phone, and query the right column
 		if strings.Contains(req.Identifier, "@") {
 			err = tx.QueryRowContext(dbCtx, `
                 SELECT id, password_hash, status 
@@ -152,12 +158,12 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, stri
 			return apperrors.ErrDatabase
 		}
 
-		// Check user status
+		// Check if user is active
 		if status != "active" {
 			return apperrors.ErrUserSuspended
 		}
 
-		// Verify password
+		// Verify user password
 		err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password))
 		if err != nil {
 			return apperrors.ErrInvalidPassword
@@ -170,7 +176,7 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, stri
 		}
 
 		// Audit Log
-		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
+		err = s.Audit.Log(dbCtx, tx, audit.LogEntry{
 			UserID:     &userID,
 			Action:     "user.logged_in",
 			EntityType: "user",
@@ -195,9 +201,11 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 	var (
 		newAccessToken  string
 		newRefreshToken string
+
+		err error
 	)
 
-	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+	err = db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		// Find session
 		rows, err := tx.QueryContext(dbCtx, `
 			SELECT id, refresh_token_hash, user_id
@@ -290,7 +298,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 		}
 
 		// Audit Log
-		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
+		err = s.Audit.Log(dbCtx, tx, audit.LogEntry{
 			UserID:     &userID,
 			Action:     "token.refreshed",
 			EntityType: "user",
@@ -303,11 +311,8 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 
 		return nil
 	})
-	if err != nil {
-		return "", "", err
-	}
 
-	return newAccessToken, newRefreshToken, nil
+	return newAccessToken, newRefreshToken, err
 }
 
 // Logout revokes sessions for a user's device
@@ -332,7 +337,7 @@ func (s *AuthService) Logout(ctx context.Context, sessionID string) error {
 		}
 
 		// Audit Log
-		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
+		err = s.Audit.Log(dbCtx, tx, audit.LogEntry{
 			UserID:     &userID,
 			Action:     "user.logged_out",
 			EntityType: "user",
@@ -369,7 +374,7 @@ func (s *AuthService) LogoutAllDevices(ctx context.Context, userID string) error
 		}
 
 		// Audit Log
-		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
+		err = s.Audit.Log(dbCtx, tx, audit.LogEntry{
 			UserID:     &userID,
 			Action:     "user.logged_out_all_devices",
 			EntityType: "user",

@@ -10,6 +10,7 @@ func WithTransaction(ctx context.Context, db *sql.DB, fn func(tx *sql.Tx) error)
 	if err != nil {
 		return err
 	}
+
 	defer func() {
 		_ = tx.Rollback()
 	}()

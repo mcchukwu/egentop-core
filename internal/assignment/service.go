@@ -25,7 +25,7 @@ func NewAssignmentService(db *sql.DB, repo *AssignmentRepository, auditService *
 	}
 }
 
-func (s *AssignmentService) Create(ctx context.Context, orgID string, userID string, projectID string, req CreateAssignmentRequest) (*Assignment, error) {
+func (s *AssignmentService) Create(ctx context.Context, orgID string, userID string, projectID string, milestoneID string, req CreateAssignmentRequest) (*Assignment, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -67,8 +67,25 @@ func (s *AssignmentService) Create(ctx context.Context, orgID string, userID str
 			"assigned_to":  assignment.AssignedTo,
 			"assigned_by":  assignment.AssignedBy,
 		})
-
 		if err := s.ActivityService.Log(dbCtx, tx, activity); err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	return assignment, err
+}
+
+func (s *AssignmentService) GetByID(ctx context.Context, orgID string, assignmentID string) (*Assignment, error) {
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
+
+	assignment := &Assignment{}
+
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		err := s.Repo.GetByID(dbCtx, tx, assignmentID, assignment)
+		if err != nil {
 			return err
 		}
 

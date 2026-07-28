@@ -93,9 +93,6 @@ CREATE TABLE memberships (
 );
 
 -- MEMBERSIP INDEXES
-CREATE INDEX idx_memberships_user_org
-ON memberships(user_id, organization_id);
-
 CREATE UNIQUE INDEX idx_unique_membership
 ON memberships(user_id, organization_id);
 

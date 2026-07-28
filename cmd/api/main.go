@@ -12,11 +12,12 @@ import (
 	"github.com/mcchukwu/egentop/internal/activity"
 	"github.com/mcchukwu/egentop/internal/audit"
 	"github.com/mcchukwu/egentop/internal/auth"
-	"github.com/mcchukwu/egentop/internal/handler"
+	"github.com/mcchukwu/egentop/internal/health"
 	"github.com/mcchukwu/egentop/internal/membership"
 	"github.com/mcchukwu/egentop/internal/middleware"
-	"github.com/mcchukwu/egentop/internal/org"
+	"github.com/mcchukwu/egentop/internal/organization"
 	"github.com/mcchukwu/egentop/internal/project"
+	handler "github.com/mcchukwu/egentop/internal/user"
 	"github.com/mcchukwu/egentop/internal/validation"
 	"github.com/mcchukwu/egentop/pkg/config"
 	"github.com/mcchukwu/egentop/pkg/db"
@@ -69,8 +70,8 @@ func main() {
 	authService := auth.NewAuthService(db.DB, []byte(cfg.JWTSecret), auditService)
 	authHandler := auth.NewAuthHandler(authService)
 
-	orgService := org.NewOrgService(db.DB, auditService)
-	orgHandler := org.NewOrgHandler(orgService)
+	orgService := organization.NewOrganizationService(db.DB, auditService)
+	orgHandler := organization.NewOrganizationHandler(orgService)
 
 	membershipService := membership.NewMembershipService(db.DB, auditService)
 	membershipHandler := membership.NewMembershipHandler(membershipService)
@@ -81,13 +82,14 @@ func main() {
 
 	// Protected routes
 	mux.Handle("GET /v1/me", authMiddleware.RequireAuth(http.HandlerFunc(handler.MeHandler)))
+
 	mux.Handle("POST /v1/auth/refresh", authMiddleware.RequireAuth(refreshLimiterMiddleware.Limit(http.HandlerFunc(authHandler.RefreshToken))))
 	mux.Handle("POST /v1/auth/logout", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.Logout)))
 	mux.Handle("POST /v1/auth/logout-all", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.LogoutAllDevices)))
 
-	mux.Handle("POST /v1/orgs", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.CreateOrgs)))
-	mux.Handle("GET /v1/orgs", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.GetOrgs)))
-	mux.Handle("GET /v1/orgs/{orgID}", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.GetOrgs)))
+	mux.Handle("POST /v1/orgs", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.CreateOrganization)))
+	mux.Handle("GET /v1/orgs", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.GetUserOrganizations)))
+	mux.Handle("GET /v1/orgs/{orgID}", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.GetUserOrganizationByID)))
 
 	// RBAC on organizations
 	mux.Handle("GET /v1/orgs/{orgID}/members", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(membership.RoleAdmin, membership.RoleOwner)(http.HandlerFunc(membershipHandler.GetOrgMembers))))))
@@ -109,7 +111,7 @@ func main() {
 	mux.Handle("POST /v1/auth/login", loginLimiterMiddleware.Limit(http.HandlerFunc(authHandler.Login)))
 
 	// Health check route (for load balancers)
-	healthHandler := handler.NewHealthHandler(db.DB)
+	healthHandler := health.NewHealthHandler(db.DB)
 
 	mux.HandleFunc("GET /v1/health", healthHandler.Health)
 	mux.HandleFunc("GET /v1/ready", healthHandler.Ready)

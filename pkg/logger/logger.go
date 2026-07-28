@@ -9,3 +9,7 @@ func Info(msg string) {
 func Error(msg string) {
 	log.Println("[ERROR]", msg)
 }
+
+func Warn(msg string) {
+	log.Println("[ERROR]", msg)
+}

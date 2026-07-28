@@ -108,7 +108,8 @@ var (
 	ErrRateLimited = errors.New("too many requests")
 
 	// SYSTEM
-	ErrInternalServer = errors.New("internal server error")
+	ErrInternalServer   = errors.New("internal server error")
+	ErrMethodNotAllowed = errors.New("method not allowed")
 
 	ErrDatabase = errors.New("database error")
 )

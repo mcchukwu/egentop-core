@@ -23,7 +23,7 @@ func (m *OrgMiddleware) LoadOrg(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		orgID := r.PathValue("orgID")
 		if orgID == "" {
-			response.HandleError(w, apperrors.ErrOrganizationNotFound)
+			response.HandleError(w, apperrors.ErrInvalidRequestBody)
 			return
 		}
 
@@ -44,7 +44,7 @@ func (m *OrgMiddleware) LoadOrg(next http.Handler) http.Handler {
 				return
 			}
 
-			response.HandleError(w, apperrors.ErrInternalServer)
+			response.HandleError(w, apperrors.ErrDatabase)
 			return
 		}
 

@@ -15,11 +15,11 @@ import (
 var cfg = config.Load()
 
 type AuthHandler struct {
-	AuthService *AuthService
+	Service *AuthService
 }
 
-func NewAuthHandler(authService *AuthService) *AuthHandler {
-	return &AuthHandler{AuthService: authService}
+func NewAuthHandler(service *AuthService) *AuthHandler {
+	return &AuthHandler{Service: service}
 }
 
 // Register creates a new user account
@@ -54,13 +54,27 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call register service
-	if err := h.AuthService.Register(r.Context(), req); err != nil {
+	accessToken, refreshToken, err := h.Service.Register(r.Context(), req)
+	if err != nil {
 		response.HandleError(w, err)
 		return
 	}
 
+	// Set cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    refreshToken,
+		HttpOnly: true,
+		Secure:   cfg.AppEnv == "production", // true in production HTTPS
+		Path:     "/",
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   60 * 60 * 24 * 30,
+	})
+
 	// Return response
-	response.Success(w, http.StatusOK, "registration successful", nil)
+	response.Success(w, http.StatusOK, "registration successful", map[string]any{
+		"access_token": accessToken,
+	})
 }
 
 // Login validates the user credentials and returns a JWT access token
@@ -82,7 +96,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call login service
-	accessToken, refreshToken, err := h.AuthService.Login(r.Context(), req)
+	accessToken, refreshToken, err := h.Service.Login(r.Context(), req)
 	if err != nil {
 		response.HandleError(w, err)
 		return
@@ -114,7 +128,7 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, newRefreshToken, err := h.AuthService.RefreshToken(r.Context(), cookie.Value)
+	accessToken, newRefreshToken, err := h.Service.RefreshToken(r.Context(), cookie.Value)
 	if err != nil {
 		response.HandleError(w, err)
 		return
@@ -147,7 +161,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call logout service
-	if err := h.AuthService.Logout(r.Context(), sessionID); err != nil {
+	if err := h.Service.Logout(r.Context(), sessionID); err != nil {
 		response.HandleError(w, err)
 		return
 	}
@@ -176,7 +190,7 @@ func (h *AuthHandler) LogoutAllDevices(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call logoutalldevices service
-	if err := h.AuthService.LogoutAllDevices(r.Context(), userID); err != nil {
+	if err := h.Service.LogoutAllDevices(r.Context(), userID); err != nil {
 		response.HandleError(w, err)
 		return
 	}
