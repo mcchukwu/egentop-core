@@ -8,17 +8,17 @@ import (
 	"github.com/mcchukwu/egentop/internal/apperrors"
 )
 
-type AuditService struct {
+type Service struct {
 	DB *sql.DB
 }
 
-func NewAuditService(dbConn *sql.DB) *AuditService {
-	return &AuditService{
+func NewService(dbConn *sql.DB) *Service {
+	return &Service{
 		DB: dbConn,
 	}
 }
 
-func (s *AuditService) Log(ctx context.Context, tx *sql.Tx, entry LogEntry) error {
+func (s *Service) Log(ctx context.Context, tx *sql.Tx, entry LogEntry) error {
 	if entry.OrganizationID == nil {
 		return apperrors.ErrInvalidRequestBody
 	}

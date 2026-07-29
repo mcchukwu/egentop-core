@@ -5,18 +5,18 @@ import (
 	"database/sql"
 )
 
-type AssignmentRepository struct {
+type Repository struct {
 	DB *sql.DB
 }
 
-func NewAssignmentRepository(db *sql.DB) *AssignmentRepository {
-	return &AssignmentRepository{
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{
 		DB: db,
 	}
 }
 
 // Create creates a new assignment
-func (r *AssignmentRepository) Create(ctx context.Context, tx *sql.Tx, assignment *Assignment) error {
+func (r *Repository) Create(ctx context.Context, tx *sql.Tx, assignment *Assignment) error {
 	query := `
 		INSERT INTO assignments (
 			organization_id,
@@ -39,7 +39,7 @@ func (r *AssignmentRepository) Create(ctx context.Context, tx *sql.Tx, assignmen
 }
 
 // GetByID returns an assignment by ID
-func (r *AssignmentRepository) GetByID(ctx context.Context, tx *sql.Tx, assignmentID string, assignment *Assignment) error {
+func (r *Repository) GetByID(ctx context.Context, tx *sql.Tx, assignmentID string, assignment *Assignment) error {
 	query := `
 		SELECT
 			id,

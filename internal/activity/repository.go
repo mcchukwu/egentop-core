@@ -8,17 +8,17 @@ import (
 	"github.com/mcchukwu/egentop/internal/apperrors"
 )
 
-type ActivityRepository struct {
+type Repository struct {
 	DB *sql.DB
 }
 
-func NewActivityRepository(db *sql.DB) *ActivityRepository {
-	return &ActivityRepository{
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{
 		DB: db,
 	}
 }
 
-func (r *ActivityRepository) Create(ctx context.Context, tx *sql.Tx, a *Activity) error {
+func (r *Repository) Create(ctx context.Context, tx *sql.Tx, a *Activity) error {
 	metadata, err := json.Marshal(a.Metadata)
 	if err != nil {
 		return apperrors.ErrInternalServer

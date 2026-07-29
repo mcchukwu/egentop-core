@@ -8,18 +8,18 @@ import (
 	"github.com/mcchukwu/egentop/internal/apperrors"
 )
 
-type ProjectRepository struct {
+type Repository struct {
 	DB *sql.DB
 }
 
-func NewProjectRepository(db *sql.DB) *ProjectRepository {
-	return &ProjectRepository{
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{
 		DB: db,
 	}
 }
 
 // Create creates a new project
-func (r *ProjectRepository) Create(ctx context.Context, tx *sql.Tx, project *Project) error {
+func (r *Repository) Create(ctx context.Context, tx *sql.Tx, project *Project) error {
 	query := `
 		INSERT INTO projects (name, description, status, priority, due_date, created_by, organization_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -35,7 +35,7 @@ func (r *ProjectRepository) Create(ctx context.Context, tx *sql.Tx, project *Pro
 }
 
 // ListByOrganization lists all projects for an organization
-func (r *ProjectRepository) ListByOrganizationID(ctx context.Context, organizationID string) ([]Project, error) {
+func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID string) ([]Project, error) {
 	var projects []Project
 
 	query := `
@@ -80,7 +80,7 @@ func (r *ProjectRepository) ListByOrganizationID(ctx context.Context, organizati
 }
 
 // GetProjectByID gets a project by ID
-func (r *ProjectRepository) GetByID(ctx context.Context, projectID string) (*Project, error) {
+func (r *Repository) GetByID(ctx context.Context, projectID string) (*Project, error) {
 	query := `
 		SELECT
 			id,
@@ -111,7 +111,7 @@ func (r *ProjectRepository) GetByID(ctx context.Context, projectID string) (*Pro
 }
 
 // UpdateStatus updates the status of a project
-func (r *ProjectRepository) UpdateStatus(ctx context.Context, tx *sql.Tx, projectID string, status ProjectStatus) error {
+func (r *Repository) UpdateStatus(ctx context.Context, tx *sql.Tx, projectID string, status ProjectStatus) error {
 	query := `
 		UPDATE projects
 		SET
@@ -137,7 +137,7 @@ func (r *ProjectRepository) UpdateStatus(ctx context.Context, tx *sql.Tx, projec
 }
 
 // CreateMilestone creates a new milestone
-func (r *ProjectRepository) CreateMilestone(ctx context.Context, tx *sql.Tx, milestone *Milestone) error {
+func (r *Repository) CreateMilestone(ctx context.Context, tx *sql.Tx, milestone *Milestone) error {
 	query := `
 	INSERT INTO milestones (
 		project_id,
@@ -165,7 +165,7 @@ func (r *ProjectRepository) CreateMilestone(ctx context.Context, tx *sql.Tx, mil
 }
 
 // ListMilestonesByProject lists all milestones for a project
-func (r *ProjectRepository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, projectID string) ([]Milestone, error) {
+func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, projectID string) ([]Milestone, error) {
 	var milestones []Milestone
 
 	query := `
@@ -210,7 +210,7 @@ func (r *ProjectRepository) ListMilestonesByProjectID(ctx context.Context, db *s
 }
 
 // GetMilestoneByID gets a milestone by ID
-func (r *ProjectRepository) GetMilestoneByID(ctx context.Context, db *sql.DB, milestoneID string) (*Milestone, error) {
+func (r *Repository) GetMilestoneByID(ctx context.Context, db *sql.DB, milestoneID string) (*Milestone, error) {
 	query := `
 		SELECT
 			id,
@@ -241,7 +241,7 @@ func (r *ProjectRepository) GetMilestoneByID(ctx context.Context, db *sql.DB, mi
 }
 
 // UpdateMilestoneStatus updates the status of a milestone
-func (r *ProjectRepository) UpdateMilestoneStatus(ctx context.Context, tx *sql.Tx, milestoneID string, status MilestoneStatus) error {
+func (r *Repository) UpdateMilestoneStatus(ctx context.Context, tx *sql.Tx, milestoneID string, status MilestoneStatus) error {
 	query := `
 	UPDATE milestones
 	SET
@@ -270,7 +270,7 @@ func (r *ProjectRepository) UpdateMilestoneStatus(ctx context.Context, tx *sql.T
 // --- Tenant Isolation queries ---
 
 // GetByID gets a project by ID
-func (r *ProjectRepository) GetProjectByIDAndOrganizationID(ctx context.Context, projectID string, organizationID string) (*Project, error) {
+func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projectID string, organizationID string) (*Project, error) {
 	query := `
 		SELECT
 			id,
@@ -302,7 +302,7 @@ func (r *ProjectRepository) GetProjectByIDAndOrganizationID(ctx context.Context,
 }
 
 // GetMilestoneByIDAndOrganization gets a milestone by ID and organization ID
-func (r *ProjectRepository) GetMilestoneByIDAndOrganizationID(ctx context.Context, milestoneID string, organizationID string) (*Milestone, error) {
+func (r *Repository) GetMilestoneByIDAndOrganizationID(ctx context.Context, milestoneID string, organizationID string) (*Milestone, error) {
 	query := `
 		SELECT
 			id,

@@ -7,17 +7,17 @@ import (
 	"github.com/mcchukwu/egentop/internal/apperrors"
 )
 
-type ActivityService struct {
-	Repo *ActivityRepository
+type Service struct {
+	Repo *Repository
 }
 
-func NewActivityService(repo *ActivityRepository) *ActivityService {
-	return &ActivityService{
+func NewService(repo *Repository) *Service {
+	return &Service{
 		Repo: repo,
 	}
 }
 
-func (s *ActivityService) Log(ctx context.Context, tx *sql.Tx, entry LogActivityEntry) error {
+func (s *Service) Log(ctx context.Context, tx *sql.Tx, entry LogActivityEntry) error {
 	if entry.OrganizationID == "" {
 		return apperrors.ErrInvalidRequestBody
 	}

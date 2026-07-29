@@ -10,18 +10,18 @@ import (
 	"github.com/mcchukwu/egentop/internal/validation"
 )
 
-type AssignmentHandler struct {
-	Service *AssignmentService
+type Handler struct {
+	Service *Service
 }
 
-func NewAssignmentHandler(service *AssignmentService) *AssignmentHandler {
-	return &AssignmentHandler{
+func NewHandler(service *Service) *Handler {
+	return &Handler{
 		Service: service,
 	}
 }
 
 // Create creates a new assignment - /assignments
-func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	var req CreateAssignmentRequest
@@ -59,7 +59,8 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if assignment, err := h.Service.Create(r.Context(), organizationID, userID, projectID, milestoneID, req); err != nil {
+	assignment, err := h.Service.Create(r.Context(), organizationID, userID, projectID, milestoneID, req)
+	if err != nil {
 		response.HandleError(w, err)
 		return
 	}

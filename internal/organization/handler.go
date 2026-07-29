@@ -9,18 +9,18 @@ import (
 	"github.com/mcchukwu/egentop/internal/response"
 )
 
-type OrganizationHandler struct {
-	Service *OrganizationService
+type Handler struct {
+	Service *Service
 }
 
-func NewOrganizationHandler(service *OrganizationService) *OrganizationHandler {
-	return &OrganizationHandler{
+func NewHandler(service *Service) *Handler {
+	return &Handler{
 		Service: service,
 	}
 }
 
 // Create creates a new organization
-func (h *OrganizationHandler) CreateOrganization(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateOrganizationRequest
 
 	// Decode request body
@@ -41,7 +41,7 @@ func (h *OrganizationHandler) CreateOrganization(w http.ResponseWriter, r *http.
 		return
 	}
 
-	orgID, err := h.Service.CreateOrganization(r.Context(), req.Name, req.Slug, userID)
+	orgID, err := h.Service.Create(r.Context(), req.Name, req.Slug, userID)
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return
@@ -53,14 +53,14 @@ func (h *OrganizationHandler) CreateOrganization(w http.ResponseWriter, r *http.
 }
 
 // Get returns all organizations for the authenticated user
-func (h *OrganizationHandler) GetUserOrganizations(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requestctx.UserID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrUnauthorized)
 		return
 	}
 
-	orgs, err := h.Service.GetUserOrganizations(r.Context(), userID)
+	orgs, err := h.Service.List(r.Context(), userID)
 	if err != nil {
 		response.HandleError(w, err)
 		return
@@ -69,20 +69,15 @@ func (h *OrganizationHandler) GetUserOrganizations(w http.ResponseWriter, r *htt
 	response.Success(w, http.StatusOK, "organizations fetched", orgs)
 }
 
-// GetUserOrganizationByID
-func (h *OrganizationHandler) GetUserOrganizationByID(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requestctx.UserID(r.Context())
-	if !ok {
-		response.HandleError(w, apperrors.ErrUnauthorized)
-	}
-
+// GetByID
+func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := requestctx.OrganizationID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrUnauthorized)
 		return
 	}
 
-	org, err := h.Service.GetOrganizationByID(r.Context(), userID, orgID)
+	org, err := h.Service.GetByID(r.Context(), orgID)
 	if err != nil {
 		response.HandleError(w, err)
 		return

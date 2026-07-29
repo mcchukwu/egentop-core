@@ -9,20 +9,20 @@ import (
 	"github.com/mcchukwu/egentop/pkg/db"
 )
 
-type MembershipService struct {
+type Service struct {
 	DB           *sql.DB
-	AuditService *audit.AuditService
+	AuditService *audit.Service
 }
 
-func NewMembershipService(db *sql.DB, auditService *audit.AuditService) *MembershipService {
-	return &MembershipService{
+func NewService(db *sql.DB, auditService *audit.Service) *Service {
+	return &Service{
 		DB:           db,
 		AuditService: auditService,
 	}
 }
 
 // AddOrgMember adds a user to an organization
-func (s *MembershipService) AddOrgMember(ctx context.Context, orgID string, actorID string, userID string, userRole Role) error {
+func (s *Service) AddOrgMember(ctx context.Context, orgID string, actorID string, userID string, userRole Role) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -73,7 +73,7 @@ func (s *MembershipService) AddOrgMember(ctx context.Context, orgID string, acto
 }
 
 // GetOrgMembers returns all members of an organization
-func (s *MembershipService) GetOrgMembers(ctx context.Context, orgID string) ([]Membership, error) {
+func (s *Service) GetOrgMembers(ctx context.Context, orgID string) ([]Membership, error) {
 	var members []Membership
 
 	dbCtx, cancel := db.WithDBTimeout(ctx)
@@ -106,6 +106,10 @@ func (s *MembershipService) GetOrgMembers(ctx context.Context, orgID string) ([]
 			}
 
 			members = append(members, m)
+
+		}
+		if rows.Err() != nil {
+			return apperrors.ErrDatabase
 		}
 
 		return nil
@@ -115,7 +119,7 @@ func (s *MembershipService) GetOrgMembers(ctx context.Context, orgID string) ([]
 }
 
 // RemoveOrgMember removes a user from an organization
-func (s *MembershipService) RemoveOrgMember(ctx context.Context, orgID string, actorID string, userID string) error {
+func (s *Service) RemoveOrgMember(ctx context.Context, orgID string, actorID string, userID string) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -176,7 +180,7 @@ func (s *MembershipService) RemoveOrgMember(ctx context.Context, orgID string, a
 }
 
 // UpdateOrgMember updates a user's role in an organization
-func (s *MembershipService) UpdateOrgMemberRole(ctx context.Context, orgID string, actorID string, userID string, newRole Role) error {
+func (s *Service) UpdateOrgMemberRole(ctx context.Context, orgID string, actorID string, userID string, newRole Role) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 

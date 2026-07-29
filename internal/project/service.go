@@ -12,15 +12,15 @@ import (
 	"github.com/mcchukwu/egentop/pkg/db"
 )
 
-type ProjectService struct {
+type Service struct {
 	DB              *sql.DB
-	Repo            *ProjectRepository
-	AuditService    *audit.AuditService
-	ActivityService *activity.ActivityService
+	Repo            *Repository
+	AuditService    *audit.Service
+	ActivityService *activity.Service
 }
 
-func NewProjectService(db *sql.DB, repo *ProjectRepository, auditService *audit.AuditService, activityService *activity.ActivityService) *ProjectService {
-	return &ProjectService{
+func NewService(db *sql.DB, repo *Repository, auditService *audit.Service, activityService *activity.Service) *Service {
+	return &Service{
 		DB:              db,
 		Repo:            repo,
 		AuditService:    auditService,
@@ -29,7 +29,7 @@ func NewProjectService(db *sql.DB, repo *ProjectRepository, auditService *audit.
 }
 
 // CreateProject creates a new project
-func (s *ProjectService) Create(ctx context.Context, createdBy string, organizationID string, req CreateProjectRequest) (*Project, error) {
+func (s *Service) Create(ctx context.Context, createdBy string, organizationID string, req CreateProjectRequest) (*Project, error) {
 	priority := ProjectPriorityMedium
 	var dueDate *time.Time
 
@@ -105,7 +105,7 @@ func (s *ProjectService) Create(ctx context.Context, createdBy string, organizat
 }
 
 // ListProjects lists all projects for an organization
-func (s *ProjectService) ListByOrganizationID(ctx context.Context, organizationID string) ([]Project, error) {
+func (s *Service) ListByOrganizationID(ctx context.Context, organizationID string) ([]Project, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -113,7 +113,7 @@ func (s *ProjectService) ListByOrganizationID(ctx context.Context, organizationI
 }
 
 // GetProjectByID gets a project by ID
-func (s *ProjectService) GetByID(ctx context.Context, projectID string) (*Project, error) {
+func (s *Service) GetByID(ctx context.Context, projectID string) (*Project, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -121,7 +121,7 @@ func (s *ProjectService) GetByID(ctx context.Context, projectID string) (*Projec
 }
 
 // UpdateProjectStatus updates the status of a project
-func (s *ProjectService) UpdateStatus(ctx context.Context, userID string, organizationID string, projectID string, status ProjectStatus) error {
+func (s *Service) UpdateStatus(ctx context.Context, userID string, organizationID string, projectID string, status ProjectStatus) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -175,7 +175,7 @@ func (s *ProjectService) UpdateStatus(ctx context.Context, userID string, organi
 }
 
 // CreateMilestone creates a new milestone
-func (s *ProjectService) CreateMilestone(ctx context.Context, organizationID string, projectID string, userID string, input CreateMilestoneInput) (*Milestone, error) {
+func (s *Service) CreateMilestone(ctx context.Context, organizationID string, projectID string, userID string, input CreateMilestoneInput) (*Milestone, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -248,7 +248,7 @@ func (s *ProjectService) CreateMilestone(ctx context.Context, organizationID str
 }
 
 // ListMilestones lists all milestones for a project
-func (s *ProjectService) ListMilestonesByProjectID(ctx context.Context, projectID string) ([]Milestone, error) {
+func (s *Service) ListMilestonesByProjectID(ctx context.Context, projectID string) ([]Milestone, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -256,7 +256,7 @@ func (s *ProjectService) ListMilestonesByProjectID(ctx context.Context, projectI
 }
 
 // GetMilestoneByID gets a milestone by ID
-func (s *ProjectService) GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error) {
+func (s *Service) GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -264,7 +264,7 @@ func (s *ProjectService) GetMilestoneByID(ctx context.Context, milestoneID strin
 }
 
 // UpdateMilestoneStatus updates the status of a milestone
-func (s *ProjectService) UpdateMilestoneStatus(ctx context.Context, orgID string, userID string, milestoneID string, status MilestoneStatus) error {
+func (s *Service) UpdateMilestoneStatus(ctx context.Context, orgID string, userID string, milestoneID string, status MilestoneStatus) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -323,14 +323,14 @@ func (s *ProjectService) UpdateMilestoneStatus(ctx context.Context, orgID string
 // --- Helpers ---
 
 // Eusure project is accessible by the user
-func (s *ProjectService) ensureProjectAccess(ctx context.Context, projectID string, organizationID string) (*Project, error) {
+func (s *Service) ensureProjectAccess(ctx context.Context, projectID string, organizationID string) (*Project, error) {
 	project, err := s.Repo.GetProjectByIDAndOrganizationID(ctx, projectID, organizationID)
 
 	return project, err
 }
 
 // Ensure milestone is accessible by the user
-func (s *ProjectService) ensureMilestoneAccess(ctx context.Context, milestoneID string, organizationID string) (*Milestone, error) {
+func (s *Service) ensureMilestoneAccess(ctx context.Context, milestoneID string, organizationID string) (*Milestone, error) {
 	milestone, err := s.Repo.GetMilestoneByIDAndOrganizationID(ctx, milestoneID, organizationID)
 
 	return milestone, err

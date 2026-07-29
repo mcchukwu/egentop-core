@@ -9,15 +9,15 @@ import (
 	"github.com/mcchukwu/egentop/pkg/db"
 )
 
-type AssignmentService struct {
+type Service struct {
 	DB              *sql.DB
-	Repo            *AssignmentRepository
-	AuditServie     *audit.AuditService
-	ActivityService *activity.ActivityService
+	Repo            *Repository
+	AuditServie     *audit.Service
+	ActivityService *activity.Service
 }
 
-func NewAssignmentService(db *sql.DB, repo *AssignmentRepository, auditService *audit.AuditService, activityService *activity.ActivityService) *AssignmentService {
-	return &AssignmentService{
+func NewService(db *sql.DB, repo *Repository, auditService *audit.Service, activityService *activity.Service) *Service {
+	return &Service{
 		DB:              db,
 		Repo:            repo,
 		AuditServie:     auditService,
@@ -25,7 +25,7 @@ func NewAssignmentService(db *sql.DB, repo *AssignmentRepository, auditService *
 	}
 }
 
-func (s *AssignmentService) Create(ctx context.Context, orgID string, userID string, projectID string, milestoneID string, req CreateAssignmentRequest) (*Assignment, error) {
+func (s *Service) Create(ctx context.Context, orgID string, userID string, projectID string, milestoneID string, req CreateAssignmentRequest) (*Assignment, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -61,7 +61,7 @@ func (s *AssignmentService) Create(ctx context.Context, orgID string, userID str
 		}
 
 		// Log activity
-		activity := activity.NewActivity(assignment.OrganizationID, assignment.AssignedBy, assignment.ProjectID, assignment.MilestoneID, activity.ActivityAssignmentCreated, "Assignment created", map[string]any{
+		activity := activity.NewActivity(assignment.OrganizationID, assignment.AssignedBy, assignment.ProjectID, assignment.MilestoneID, activity.ActivityAssignmentCreated, " created", map[string]any{
 			"project_id":   assignment.ProjectID,
 			"milestone_id": assignment.MilestoneID,
 			"assigned_to":  assignment.AssignedTo,
@@ -77,7 +77,7 @@ func (s *AssignmentService) Create(ctx context.Context, orgID string, userID str
 	return assignment, err
 }
 
-func (s *AssignmentService) GetByID(ctx context.Context, orgID string, assignmentID string) (*Assignment, error) {
+func (s *Service) GetByID(ctx context.Context, orgID string, assignmentID string) (*Assignment, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 

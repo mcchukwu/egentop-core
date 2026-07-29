@@ -3,6 +3,7 @@ package organization
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/audit"
@@ -10,20 +11,20 @@ import (
 	"github.com/mcchukwu/egentop/pkg/db"
 )
 
-type OrganizationService struct {
+type Service struct {
 	DB    *sql.DB
-	Audit *audit.AuditService
+	Audit *audit.Service
 }
 
-func NewOrganizationService(db *sql.DB, audit *audit.AuditService) *OrganizationService {
-	return &OrganizationService{
+func NewService(db *sql.DB, audit *audit.Service) *Service {
+	return &Service{
 		DB:    db,
 		Audit: audit,
 	}
 }
 
-// CreateOrganization creates a new organization
-func (s *OrganizationService) CreateOrganization(ctx context.Context, name string, slug string, ownerID string) (string, error) {
+// Create creates a new organization
+func (s *Service) Create(ctx context.Context, name string, slug string, ownerID string) (string, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -74,22 +75,32 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, name strin
 	return orgID, err
 }
 
-// GetUserOrg returns all organizations an active user belongs to
-func (s *OrganizationService) GetUserOrganizations(ctx context.Context, userID string) ([]membership.Membership, error) {
+// List returns all organizations an active user belongs to
+func (s *Service) List(ctx context.Context, userID string) ([]membership.Membership, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	var result []membership.Membership
+	var memberships []membership.Membership
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		// Find user rows in memberships table
 		rows, err := tx.QueryContext(dbCtx, `
-		SELECT user_id, organization_id, role, status, created_at
-		FROM memberships
-		WHERE user_id = $1 AND status = 'active'
-		`, userID)
+			SELECT 
+			user_id, 
+			organization_id, 
+			role, 
+			status, 
+			created_at
+			FROM memberships
+			WHERE user_id = $1 
+			AND status = $2
+		`, userID, OrganizationStatusActive)
 		if err != nil {
-			return apperrors.ErrInternalServer
+			if errors.Is(err, sql.ErrNoRows) {
+				return apperrors.ErrUserNotFound
+			}
+
+			return apperrors.ErrDatabase
 		}
 
 		defer rows.Close()
@@ -103,16 +114,19 @@ func (s *OrganizationService) GetUserOrganizations(ctx context.Context, userID s
 				return apperrors.ErrInternalServer
 			}
 
-			result = append(result, m)
+			memberships = append(memberships, m)
+		}
+		if rows.Err() != nil {
+			return apperrors.ErrDatabase
 		}
 
 		return nil
 	})
 
-	return result, err
+	return memberships, err
 }
 
-func (s *OrganizationService) GetOrganizationByID(ctx context.Context, userID string, orgID string) (*Organization, error) {
+func (s *Service) GetByID(ctx context.Context, orgID string) (*Organization, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -121,17 +135,20 @@ func (s *OrganizationService) GetOrganizationByID(ctx context.Context, userID st
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		err := tx.QueryRowContext(dbCtx,
 			`SELECT
-				id,
-				name,
-				slug,
-				status,
-				created_at,
-				updated_at
+			id,
+			name,
+			slug,
+			status,
+			created_at,
+			updated_at
 			FROM organizations
 			WHERE id = $1
-			AND status = 'active'
-		`, orgID).Scan(&result.ID, &result.Name, &result.Slug, &result.Status, &result.CreatedAt, &result.UpdatedAt)
+			AND status = $2
+		`, orgID, OrganizationStatusActive).Scan(&result.ID, &result.Name, &result.Slug, &result.Status, &result.CreatedAt, &result.UpdatedAt)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return apperrors.ErrOrganizationNotFound
+			}
 			return apperrors.ErrDatabase
 		}
 

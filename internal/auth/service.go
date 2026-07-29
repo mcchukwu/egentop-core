@@ -19,14 +19,14 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-type AuthService struct {
+type Service struct {
 	DB        *sql.DB
 	JWTSecret []byte
-	Audit     *audit.AuditService
+	Audit     *audit.Service
 }
 
-func NewAuthService(db *sql.DB, secret []byte, audit *audit.AuditService) *AuthService {
-	return &AuthService{
+func NewService(db *sql.DB, secret []byte, audit *audit.Service) *Service {
+	return &Service{
 		DB:        db,
 		JWTSecret: secret,
 		Audit:     audit,
@@ -34,7 +34,7 @@ func NewAuthService(db *sql.DB, secret []byte, audit *audit.AuditService) *AuthS
 }
 
 // Register creates a new user account and returns an active session
-func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (string, string, error) {
+func (s *Service) Register(ctx context.Context, req RegisterRequest) (string, string, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -124,7 +124,7 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (string
 }
 
 // Login validates the user credentials and returns a JWT access token
-func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, string, error) {
+func (s *Service) Login(ctx context.Context, req LoginRequest) (string, string, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -194,7 +194,7 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (string, stri
 }
 
 // RefreshToken refreshes the session
-func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (string, string, error) {
+func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (string, string, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -235,6 +235,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 				found = true
 				break
 			}
+		}
+		if rows.Err() != nil {
+			return apperrors.ErrDatabase
 		}
 
 		if !found {
@@ -316,7 +319,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 }
 
 // Logout revokes sessions for a user's device
-func (s *AuthService) Logout(ctx context.Context, sessionID string) error {
+func (s *Service) Logout(ctx context.Context, sessionID string) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -355,7 +358,7 @@ func (s *AuthService) Logout(ctx context.Context, sessionID string) error {
 }
 
 // LogoutAllDevices revokes all sessions for a user
-func (s *AuthService) LogoutAllDevices(ctx context.Context, userID string) error {
+func (s *Service) LogoutAllDevices(ctx context.Context, userID string) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 

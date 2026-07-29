@@ -10,16 +10,16 @@ import (
 	"github.com/mcchukwu/egentop/internal/validation"
 )
 
-type ProjectHandler struct {
-	Service *ProjectService
+type Handler struct {
+	Service *Service
 }
 
-func NewProjectHandler(service *ProjectService) *ProjectHandler {
-	return &ProjectHandler{Service: service}
+func NewHandler(service *Service) *Handler {
+	return &Handler{Service: service}
 }
 
 // Create creates a new project - /projects
-func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateProjectRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -55,7 +55,7 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListByOrganizationID lists all projects for an organization - /projects
-func (h *ProjectHandler) ListProjectsByOrganizationID(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListProjectsByOrganizationID(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := requestctx.OrganizationID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrUnauthorized)
@@ -74,7 +74,7 @@ func (h *ProjectHandler) ListProjectsByOrganizationID(w http.ResponseWriter, r *
 // GetProjectByID gets a project by ID - /projects/{id}
 // GetProjectByID gets a project by ID - /projects/{id}
 // TODO: pagination
-func (h *ProjectHandler) GetProjectByID(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetProjectByID(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project_id")
 	if projectID == "" {
 		response.HandleError(w, apperrors.ErrInvalidRequestBody)
@@ -97,7 +97,7 @@ func (h *ProjectHandler) GetProjectByID(w http.ResponseWriter, r *http.Request) 
 }
 
 // UpdateProjectStatus updates the status of a project
-func (h *ProjectHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	var req UpdateProjectStatusInput
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -139,7 +139,7 @@ func (h *ProjectHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateMilestone creates a new milestone - /projects/{project_id}/milestones
-func (h *ProjectHandler) CreateMilestone(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) CreateMilestone(w http.ResponseWriter, r *http.Request) {
 	var req CreateMilestoneInput
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -181,7 +181,7 @@ func (h *ProjectHandler) CreateMilestone(w http.ResponseWriter, r *http.Request)
 }
 
 // ListMilestonesByProjectID lists all milestones for a project - /projects/{project_id}/milestones
-func (h *ProjectHandler) ListMilestonesByProjectID(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListMilestonesByProjectID(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project_id")
 	if projectID == "" {
 		response.HandleError(w, apperrors.ErrInvalidRequestBody)
@@ -205,7 +205,7 @@ func (h *ProjectHandler) ListMilestonesByProjectID(w http.ResponseWriter, r *htt
 }
 
 // GetMilestoneByID gets a milestone by ID - /projects/{project_id}/milestones/{milestone_id}
-func (h *ProjectHandler) GetMilestoneByID(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetMilestoneByID(w http.ResponseWriter, r *http.Request) {
 	milestoneID := r.PathValue("milestone_id")
 	if milestoneID == "" {
 		response.HandleError(w, apperrors.ErrInvalidRequestBody)
@@ -228,7 +228,7 @@ func (h *ProjectHandler) GetMilestoneByID(w http.ResponseWriter, r *http.Request
 }
 
 // UpdateMilestoneStatus updates the status of a milestone
-func (h *ProjectHandler) UpdateMilestoneStatus(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) UpdateMilestoneStatus(w http.ResponseWriter, r *http.Request) {
 	var req UpdateMilestoneStatusInput
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

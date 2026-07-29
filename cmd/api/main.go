@@ -62,23 +62,23 @@ func main() {
 	recoveryMiddleware := middleware.NewRecoveryMiddleware()
 
 	// Configure repositories, services and handlers
-	auditService := audit.NewAuditService(db.DB)
+	auditService := audit.NewService(db.DB)
 
-	activityRepository := activity.NewActivityRepository(db.DB)
-	activityService := activity.NewActivityService(activityRepository)
+	activityRepository := activity.NewRepository(db.DB)
+	activityService := activity.NewService(activityRepository)
 
-	authService := auth.NewAuthService(db.DB, []byte(cfg.JWTSecret), auditService)
-	authHandler := auth.NewAuthHandler(authService)
+	authService := auth.NewService(db.DB, []byte(cfg.JWTSecret), auditService)
+	authHandler := auth.NewHandler(authService)
 
-	orgService := organization.NewOrganizationService(db.DB, auditService)
-	orgHandler := organization.NewOrganizationHandler(orgService)
+	orgService := organization.NewService(db.DB, auditService)
+	orgHandler := organization.NewHandler(orgService)
 
-	membershipService := membership.NewMembershipService(db.DB, auditService)
-	membershipHandler := membership.NewMembershipHandler(membershipService)
+	membershipService := membership.NewService(db.DB, auditService)
+	membershipHandler := membership.NewHandler(membershipService)
 
-	projectRepo := project.NewProjectRepository(db.DB)
-	projectService := project.NewProjectService(db.DB, projectRepo, auditService, activityService)
-	projectHandler := project.NewProjectHandler(projectService)
+	projectRepo := project.NewRepository(db.DB)
+	projectService := project.NewService(db.DB, projectRepo, auditService, activityService)
+	projectHandler := project.NewHandler(projectService)
 
 	// Protected routes
 	mux.Handle("GET /v1/me", authMiddleware.RequireAuth(http.HandlerFunc(handler.MeHandler)))
@@ -87,9 +87,9 @@ func main() {
 	mux.Handle("POST /v1/auth/logout", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.Logout)))
 	mux.Handle("POST /v1/auth/logout-all", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.LogoutAllDevices)))
 
-	mux.Handle("POST /v1/orgs", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.CreateOrganization)))
-	mux.Handle("GET /v1/orgs", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.GetUserOrganizations)))
-	mux.Handle("GET /v1/orgs/{orgID}", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.GetUserOrganizationByID)))
+	mux.Handle("POST /v1/orgs", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.Create)))
+	mux.Handle("GET /v1/orgs", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.List)))
+	mux.Handle("GET /v1/orgs/{orgID}", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.GetByID)))
 
 	// RBAC on organizations
 	mux.Handle("GET /v1/orgs/{orgID}/members", authMiddleware.RequireAuth(orgMiddleware.LoadOrg(orgAccessMiddleware.RequireMembership(rbacMiddleware.RequireRole(membership.RoleAdmin, membership.RoleOwner)(http.HandlerFunc(membershipHandler.GetOrgMembers))))))

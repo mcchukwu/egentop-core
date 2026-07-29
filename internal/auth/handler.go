@@ -14,16 +14,16 @@ import (
 
 var cfg = config.Load()
 
-type AuthHandler struct {
-	Service *AuthService
+type Handler struct {
+	Service *Service
 }
 
-func NewAuthHandler(service *AuthService) *AuthHandler {
-	return &AuthHandler{Service: service}
+func NewHandler(service *Service) *Handler {
+	return &Handler{Service: service}
 }
 
 // Register creates a new user account
-func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
 
 	// Decode request
@@ -78,7 +78,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 }
 
 // Login validates the user credentials and returns a JWT access token
-func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -120,7 +120,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 // RefreshToken refreshes the session
-func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	// Read cookie
 	cookie, err := r.Cookie("refresh_token")
 	if err != nil {
@@ -152,7 +152,7 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 }
 
 // Logout invalidates the session
-func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	// Get session id
 	sessionID, ok := r.Context().Value(requestctx.SessionIDKey).(string)
 	if !ok {
@@ -181,7 +181,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // LogoutAllDevices revokes all sessions for a user
-func (h *AuthHandler) LogoutAllDevices(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) LogoutAllDevices(w http.ResponseWriter, r *http.Request) {
 	// Find user
 	userID, ok := r.Context().Value(requestctx.UserIDKey).(string)
 	if !ok {

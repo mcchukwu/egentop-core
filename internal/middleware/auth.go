@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -85,7 +86,11 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			)`,
 			claims.SessionID, claims.UserID).Scan(&exists)
 		if err != nil {
-			response.HandleError(w, err)
+			if errors.Is(err, sql.ErrNoRows) {
+				response.HandleError(w, apperrors.ErrSessionExpired)
+				return
+			}
+			response.HandleError(w, apperrors.ErrDatabase)
 			return
 		}
 

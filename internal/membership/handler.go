@@ -9,18 +9,18 @@ import (
 	"github.com/mcchukwu/egentop/internal/response"
 )
 
-type MembershipHandler struct {
-	MembershipService *MembershipService
+type Handler struct {
+	Service *Service
 }
 
-func NewMembershipHandler(service *MembershipService) *MembershipHandler {
-	return &MembershipHandler{
-		MembershipService: service,
+func NewHandler(service *Service) *Handler {
+	return &Handler{
+		Service: service,
 	}
 }
 
 // AddOrgMember adds a user to an organization
-func (h *MembershipHandler) AddOrgMember(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) AddOrgMember(w http.ResponseWriter, r *http.Request) {
 	organizationID, ok := requestctx.OrganizationID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrOrganizationNotFound)
@@ -46,7 +46,7 @@ func (h *MembershipHandler) AddOrgMember(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	err := h.MembershipService.AddOrgMember(r.Context(), organizationID, userID, req.UserID, req.Role)
+	err := h.Service.AddOrgMember(r.Context(), organizationID, userID, req.UserID, req.Role)
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return
@@ -56,14 +56,14 @@ func (h *MembershipHandler) AddOrgMember(w http.ResponseWriter, r *http.Request)
 }
 
 // GetOrgMembers returns all members of an organization
-func (h *MembershipHandler) GetOrgMembers(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetOrgMembers(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := requestctx.OrganizationID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return
 	}
 
-	members, err := h.MembershipService.GetOrgMembers(r.Context(), orgID)
+	members, err := h.Service.GetOrgMembers(r.Context(), orgID)
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return
@@ -73,7 +73,7 @@ func (h *MembershipHandler) GetOrgMembers(w http.ResponseWriter, r *http.Request
 }
 
 // UpdateOrgMember updates a user's role in an organization
-func (h *MembershipHandler) UpdateOrgMemberRole(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) UpdateOrgMemberRole(w http.ResponseWriter, r *http.Request) {
 	organizationID, ok := requestctx.OrganizationID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrOrganizationNotFound)
@@ -95,7 +95,7 @@ func (h *MembershipHandler) UpdateOrgMemberRole(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	err := h.MembershipService.UpdateOrgMemberRole(r.Context(), organizationID, userID, targetUserID, req.Role)
+	err := h.Service.UpdateOrgMemberRole(r.Context(), organizationID, userID, targetUserID, req.Role)
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return
@@ -105,7 +105,7 @@ func (h *MembershipHandler) UpdateOrgMemberRole(w http.ResponseWriter, r *http.R
 }
 
 // RemoveOrgMember removes a user from an organization
-func (h *MembershipHandler) RemoveOrgMember(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) RemoveOrgMember(w http.ResponseWriter, r *http.Request) {
 	organizationID, ok := requestctx.OrganizationID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrOrganizationNotFound)
@@ -120,7 +120,7 @@ func (h *MembershipHandler) RemoveOrgMember(w http.ResponseWriter, r *http.Reque
 
 	targetUserID := r.PathValue("userID")
 
-	err := h.MembershipService.RemoveOrgMember(r.Context(), organizationID, userID, targetUserID)
+	err := h.Service.RemoveOrgMember(r.Context(), organizationID, userID, targetUserID)
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInternalServer)
 		return
