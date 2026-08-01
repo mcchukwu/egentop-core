@@ -17,6 +17,7 @@ func NewService(repo *Repository) *Service {
 	}
 }
 
+// Log logs an activity
 func (s *Service) Log(ctx context.Context, tx *sql.Tx, entry LogActivityEntry) error {
 	if entry.OrganizationID == "" {
 		return apperrors.ErrInvalidRequestBody

@@ -18,6 +18,7 @@ func NewRepository(db *sql.DB) *Repository {
 	}
 }
 
+// Create creates a new activity
 func (r *Repository) Create(ctx context.Context, tx *sql.Tx, a *Activity) error {
 	metadata, err := json.Marshal(a.Metadata)
 	if err != nil {

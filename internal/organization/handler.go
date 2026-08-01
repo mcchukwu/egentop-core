@@ -7,6 +7,7 @@ import (
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
+	"github.com/mcchukwu/egentop/internal/validation"
 )
 
 type Handler struct {
@@ -29,9 +30,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Validate request properly
-	if req.Name == "" {
-		response.HandleError(w, apperrors.ErrValidation)
+	fields := validation.ValidateStruct(req)
+	if len(fields) > 0 {
+		response.ValidationError(w, fields)
 		return
 	}
 

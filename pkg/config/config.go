@@ -45,7 +45,7 @@ func Load() *Config {
 	return &Config{
 		AppEnv:                getEnv("APP_ENV", ""),
 		AppPort:               getEnv("APP_PORT", "8080"),
-		DatabaseURL:           getEnv("DATABASE_URL", ""),
+		DatabaseURL:           getEnv("DB_URL", ""),
 		JWTSecret:             getEnv("JWT_SECRET", ""),
 		AccessTokenTTLMinutes: accessTokenTTLMinutes,
 		RefreshTokenTTLHours:  refreshTokenTTLHours,

@@ -1,13 +1,13 @@
 package membership
 
 type AddMemberRequest struct {
-	UserID string `json:"user_id" validate:"required"`
-	Role   Role   `json:"role"`
+	UserID string `json:"user_id" validate:"required,uuid"`
+	Role   Role   `json:"role" validate:"required"`
 }
 
 type InviteMemberRequest struct {
-	Email string `json:"email" validate:"required"`
-	Role  Role   `json:"role"`
+	Email string `json:"email" validate:"required,email"`
+	Role  Role   `json:"role" validate:"required"`
 }
 
 type UpdateMemberRoleRequest struct {
