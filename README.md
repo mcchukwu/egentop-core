@@ -1,9 +1,7 @@
 # Egentop-Core
-
-Egentop-Core is a backend service for the Egentop project.
+Egentop-Core is the core backend service for the Egentop project.
 
 ## Features
-
 - Modular Clean Architecture
 - REST API with versioning
 - JWT authentication and role-based access control
@@ -14,20 +12,16 @@ Egentop-Core is a backend service for the Egentop project.
 - Comprehensive input validation
 
 ## Tech Stack
-
 | Layer | Technology |
 |--------|------------|
 | Language | Go 1.26+ |
-| HTTP Framework | Gin |
 | Database | PostgreSQL |
-| ORM/SQL | sqlc / pgx |
 | Authentication | JWT |
 | Validation | go-playground/validator/v10 |
 | Containerization | Docker & Docker Compose |
 | Testing | Go testing package |
 
 ## Architecture
-
 ```mermaid
 flowchart TD
     Client --> API
@@ -37,41 +31,34 @@ flowchart TD
 ```
 
 ## Quick Start
-
 ### Prerequisites
-
 - Go 1.26+
 - Docker
 - Docker Compose
 - Git
 
 ### Clone
-
 ```bash
 git clone https://github.com/mcchukwu/egentop-core.git ./egentop
 cd egentop
 ```
 
 ### Configure
-
 ```bash
 cp .env.example .env
 ```
 
 ### Start Dependencies
-
 ```bash
 docker compose up -d
 ```
 
 ### Run
-
 ```bash
 go run ./cmd/api
 ```
 
 ## Project Structure
-
 ```text
 cmd/           Application entry points.
 internal/      Private application code.
@@ -82,7 +69,6 @@ deployments/   Deployment manifests and configurations.
 ```
 
 ## Documentation
-
 - [Architecture](docs/architecture.md)
 - [Development Setup](docs/development-setup.md)
 - [API Documentation](docs/api/README.md)
@@ -92,7 +78,6 @@ deployments/   Deployment manifests and configurations.
 - [Roadmap](docs/roadmap.md)
 
 ## Development Workflow
-
 1. Create a feature branch.
 2. Implement changes.
 3. Add or update tests.
@@ -100,5 +85,4 @@ deployments/   Deployment manifests and configurations.
 5. Open a pull request.
 
 ## License
-
 This project is licensed under the MIT License. See the LICENSE file for details.
