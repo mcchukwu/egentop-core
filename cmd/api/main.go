@@ -37,7 +37,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Connect to database
-	if err := db.Connect(cfg.DatabaseURL); err != nil {
+	if err := db.Connect(cfg.DBURL); err != nil {
 		logger.Error("Failed to connect to database")
 		os.Exit(1)
 	}
@@ -130,7 +130,7 @@ func main() {
 
 	// Start server safely
 	go func() {
-		logger.Info("Egento API starting on port " + cfg.AppPort)
+		logger.Info("Server is running")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Failed to start server")
 			os.Exit(1)
@@ -150,7 +150,6 @@ func main() {
 	// Shutdown server
 	if err := server.Shutdown(ctx); err != nil {
 		logger.Error("Graceful shutdown failed")
-
 		server.Close()
 	}
 

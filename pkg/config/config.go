@@ -15,7 +15,7 @@ type Config struct {
 
 	AppPort string
 
-	DatabaseURL string
+	DBURL string
 
 	JWTSecret string
 
@@ -45,7 +45,7 @@ func Load() *Config {
 	return &Config{
 		AppEnv:                getEnv("APP_ENV", ""),
 		AppPort:               getEnv("APP_PORT", "8080"),
-		DatabaseURL:           getEnv("DB_URL", ""),
+		DBURL:                 getEnv("DB_URL", ""),
 		JWTSecret:             getEnv("JWT_SECRET", ""),
 		AccessTokenTTLMinutes: accessTokenTTLMinutes,
 		RefreshTokenTTLHours:  refreshTokenTTLHours,
@@ -63,7 +63,7 @@ func (c *Config) Validate() error {
 		return errors.New("invalid app port")
 	}
 
-	if c.DatabaseURL == "" {
+	if c.DBURL == "" {
 		return errors.New("database url is required")
 	}
 

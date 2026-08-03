@@ -25,6 +25,7 @@ func Connect(dsn string) error {
 	defer cancel()
 
 	if err := database.PingContext(ctx); err != nil {
+		database.Close()
 		return err
 	}
 
