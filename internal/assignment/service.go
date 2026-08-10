@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/google/uuid"
 	"github.com/mcchukwu/egentop/internal/activity"
 	"github.com/mcchukwu/egentop/internal/audit"
 	"github.com/mcchukwu/egentop/pkg/db"
+	"github.com/mcchukwu/egentop/pkg/pagination"
 )
 
 type Service struct {
@@ -25,15 +27,15 @@ func NewService(db *sql.DB, repo *Repository, auditService *audit.Service, activ
 	}
 }
 
-func (s *Service) Create(ctx context.Context, orgID string, userID string, projectID string, milestoneID string, req CreateAssignmentRequest) (*Assignment, error) {
+func (s *Service) Create(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, projectID uuid.UUID, milestoneID uuid.UUID, assignedTo uuid.UUID) (*Assignment, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
 	assignment := &Assignment{
 		OrganizationID: orgID,
 		ProjectID:      &projectID,
-		MilestoneID:    &req.MilestoneID,
-		AssignedTo:     req.AssignedTo,
+		MilestoneID:    &milestoneID,
+		AssignedTo:     assignedTo,
 		AssignedBy:     userID,
 	}
 
@@ -77,14 +79,14 @@ func (s *Service) Create(ctx context.Context, orgID string, userID string, proje
 	return assignment, err
 }
 
-func (s *Service) GetByID(ctx context.Context, orgID string, assignmentID string) (*Assignment, error) {
+func (s *Service) GetByID(ctx context.Context, orgID uuid.UUID, assignmentID uuid.UUID) (*Assignment, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
 	assignment := &Assignment{}
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		err := s.Repo.GetByID(dbCtx, tx, assignmentID, assignment)
+		err := s.Repo.GetByIDAndOrganizationID(dbCtx, tx, orgID, assignmentID, assignment)
 		if err != nil {
 			return err
 		}
@@ -93,4 +95,107 @@ func (s *Service) GetByID(ctx context.Context, orgID string, assignmentID string
 	})
 
 	return assignment, err
+}
+
+// ListByProjectID returns all assignments for a project within an organization.
+func (s *Service) ListByProjectID(ctx context.Context, orgID uuid.UUID, projectID uuid.UUID, q pagination.Query) ([]Assignment, pagination.Meta, error) {
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
+
+	assignments, total, err := s.Repo.ListByProjectID(dbCtx, orgID, projectID, q)
+	if err != nil {
+		return nil, pagination.Meta{}, err
+	}
+
+	return assignments, pagination.NewMeta(q, total), nil
+}
+
+// Update reassigns an assignment to a new user.
+func (s *Service) Update(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, projectID uuid.UUID, assignmentID uuid.UUID, assignedTo uuid.UUID) (*Assignment, error) {
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
+
+	assignment := &Assignment{}
+
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		if err := s.Repo.GetByIDAndOrganizationID(dbCtx, tx, orgID, assignmentID, assignment); err != nil {
+			return err
+		}
+
+		if err := s.Repo.UpdateAssignedTo(dbCtx, tx, orgID, assignmentID, assignedTo); err != nil {
+			return err
+		}
+
+		oldAssignedTo := assignment.AssignedTo
+		assignment.AssignedTo = assignedTo
+
+		if err := s.AuditServie.Log(dbCtx, tx, audit.LogEntry{
+			OrganizationID: &orgID,
+			UserID:         &userID,
+			Action:         "assignment.updated",
+			EntityType:     "assignment",
+			EntityID:       &assignmentID,
+			Metadata: map[string]any{
+				"project_id":      assignment.ProjectID,
+				"milestone_id":    assignment.MilestoneID,
+				"old_assigned_to": oldAssignedTo,
+				"new_assigned_to": assignedTo,
+			},
+		}); err != nil {
+			return err
+		}
+
+		activity := activity.NewActivity(orgID, userID, assignment.ProjectID, assignment.MilestoneID, activity.ActivityAssignmentUpdated, "Assignment reassigned", map[string]any{
+			"project_id":      assignment.ProjectID,
+			"milestone_id":    assignment.MilestoneID,
+			"old_assigned_to": oldAssignedTo,
+			"new_assigned_to": assignedTo,
+		})
+		return s.ActivityService.Log(dbCtx, tx, activity)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return assignment, nil
+}
+
+// Delete removes an assignment.
+func (s *Service) Delete(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, projectID uuid.UUID, assignmentID uuid.UUID) error {
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
+
+	return db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		current := &Assignment{}
+
+		if err := s.Repo.GetByIDAndOrganizationID(dbCtx, tx, orgID, assignmentID, current); err != nil {
+			return err
+		}
+
+		if err := s.Repo.Delete(dbCtx, tx, orgID, assignmentID); err != nil {
+			return err
+		}
+
+		if err := s.AuditServie.Log(dbCtx, tx, audit.LogEntry{
+			OrganizationID: &orgID,
+			UserID:         &userID,
+			Action:         "assignment.removed",
+			EntityType:     "assignment",
+			EntityID:       &assignmentID,
+			Metadata: map[string]any{
+				"project_id":   current.ProjectID,
+				"milestone_id": current.MilestoneID,
+				"assigned_to":  current.AssignedTo,
+			},
+		}); err != nil {
+			return err
+		}
+
+		activity := activity.NewActivity(orgID, userID, current.ProjectID, current.MilestoneID, activity.ActivityAssignmentRemoved, "Assignment removed", map[string]any{
+			"project_id":   current.ProjectID,
+			"milestone_id": current.MilestoneID,
+			"assigned_to":  current.AssignedTo,
+		})
+		return s.ActivityService.Log(dbCtx, tx, activity)
+	})
 }

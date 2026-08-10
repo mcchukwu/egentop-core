@@ -1,13 +1,17 @@
 package assignment
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type Assignment struct {
-	ID             string
-	OrganizationID string
-	ProjectID      *string
-	MilestoneID    *string
-	AssignedTo     string
-	AssignedBy     string
-	CreatedAt      time.Time
+	ID             uuid.UUID  `json:"id"`
+	OrganizationID uuid.UUID  `json:"organization_id"`
+	ProjectID      *uuid.UUID `json:"project_id,omitempty"`
+	MilestoneID    *uuid.UUID `json:"milestone_id,omitempty"`
+	AssignedTo     uuid.UUID  `json:"assigned_to"`
+	AssignedBy     uuid.UUID  `json:"assigned_by"`
+	CreatedAt      time.Time  `json:"created_at"`
 }

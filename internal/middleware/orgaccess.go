@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
@@ -33,11 +35,10 @@ func (m *OrgAccessMiddleware) RequireMembership(next http.Handler) http.Handler 
 			return
 		}
 
-		var membershipID string
+		var membershipID uuid.UUID
 
 		err := m.DB.QueryRowContext(r.Context(), `
-			SELECT
-				id,
+			SELECT id
 			FROM memberships
 			WHERE user_id = $1
 			AND organization_id = $2
@@ -45,7 +46,7 @@ func (m *OrgAccessMiddleware) RequireMembership(next http.Handler) http.Handler 
 			LIMIT 1
 		`, userID, organizationID).Scan(&membershipID)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if errors.Is(err, sql.ErrNoRows) {
 				response.HandleError(w, apperrors.ErrForbidden)
 				return
 			}

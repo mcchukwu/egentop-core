@@ -1,10 +1,12 @@
 package audit
 
+import "github.com/google/uuid"
+
 type LogEntry struct {
-	OrganizationID *string
-	UserID         *string
+	OrganizationID *uuid.UUID
+	UserID         *uuid.UUID
 	Action         string
 	EntityType     string
-	EntityID       *string
+	EntityID       *uuid.UUID
 	Metadata       map[string]any
 }

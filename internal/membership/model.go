@@ -1,6 +1,10 @@
 package membership
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type Role string
 
@@ -20,10 +24,11 @@ const (
 )
 
 type Membership struct {
-	ID             string
-	UserID         string
-	OrganizationID string
-	Role           Role
-	Status         MembershipStatus
-	CreatedAt      time.Time
+	ID             uuid.UUID        `json:"id"`
+	UserID         uuid.UUID        `json:"user_id"`
+	OrganizationID uuid.UUID        `json:"organization_id"`
+	RoleID         uuid.UUID        `json:"role_id"`
+	Role           Role             `json:"role"`
+	Status         MembershipStatus `json:"status"`
+	JoinedAt       time.Time        `json:"joined_at"`
 }

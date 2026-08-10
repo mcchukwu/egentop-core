@@ -7,14 +7,15 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
 )
 
 type AccessTokenClaims struct {
-	UserID    string `json:"user_id"`
-	SessionID string `json:"session_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	SessionID uuid.UUID `json:"session_id"`
 
 	jwt.RegisteredClaims
 }
@@ -66,7 +67,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		if claims.UserID == "" || claims.SessionID == "" {
+		if claims.UserID == uuid.Nil || claims.SessionID == uuid.Nil {
 			response.HandleError(w, apperrors.ErrUnauthorized)
 			return
 		}

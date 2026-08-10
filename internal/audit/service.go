@@ -19,23 +19,7 @@ func NewService(dbConn *sql.DB) *Service {
 }
 
 func (s *Service) Log(ctx context.Context, tx *sql.Tx, entry LogEntry) error {
-	if entry.OrganizationID == nil {
-		return apperrors.ErrInvalidRequestBody
-	}
-
-	if entry.UserID == nil {
-		return apperrors.ErrInvalidRequestBody
-	}
-
 	if entry.Action == "" {
-		return apperrors.ErrInvalidRequestBody
-	}
-
-	if entry.EntityType == "" {
-		return apperrors.ErrInvalidRequestBody
-	}
-
-	if entry.EntityID == nil {
 		return apperrors.ErrInvalidRequestBody
 	}
 
@@ -48,7 +32,17 @@ func (s *Service) Log(ctx context.Context, tx *sql.Tx, entry LogEntry) error {
 		return apperrors.ErrInternalServer
 	}
 
-	_, err = tx.ExecContext(ctx, `
+	exec := func(ctx context.Context, query string, args ...any) error {
+		if tx != nil {
+			_, err = tx.ExecContext(ctx, query, args...)
+			return err
+		}
+
+		_, err = s.DB.ExecContext(ctx, query, args...)
+		return err
+	}
+
+	err = exec(ctx, `
 		INSERT INTO audit_logs (
 			organization_id, 
 			user_id, 
@@ -57,7 +51,7 @@ func (s *Service) Log(ctx context.Context, tx *sql.Tx, entry LogEntry) error {
 			entity_id, 
 			metadata
 		)
-		VALUES ($1, $2, $3, $4)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`, entry.OrganizationID, entry.UserID, entry.Action, entry.EntityType, entry.EntityID, metadataJSON)
 	if err != nil {
 		return apperrors.ErrDatabase

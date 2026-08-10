@@ -1,6 +1,10 @@
 package project
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type ProjectStatus string
 
@@ -21,9 +25,9 @@ const (
 )
 
 type Project struct {
-	ID             string          `json:"id"`
-	OrganizationID string          `json:"organization_id"`
-	CreatedBy      string          `json:"created_by"`
+	ID             uuid.UUID       `json:"id"`
+	OrganizationID uuid.UUID       `json:"organization_id"`
+	CreatedBy      uuid.UUID       `json:"created_by"`
 	Name           string          `json:"name"`
 	Description    *string         `json:"description,omitempty"`
 	Status         ProjectStatus   `json:"status"`
@@ -45,10 +49,10 @@ const (
 )
 
 type Milestone struct {
-	ID             string          `json:"id"`
-	OrganizationID string          `json:"organization_id"`
-	ProjectID      string          `json:"project_id"`
-	CreatedBy      string          `json:"created_by"`
+	ID             uuid.UUID       `json:"id"`
+	OrganizationID uuid.UUID       `json:"organization_id"`
+	ProjectID      uuid.UUID       `json:"project_id"`
+	CreatedBy      uuid.UUID       `json:"created_by"`
 	Title          string          `json:"title"`
 	Description    *string         `json:"description,omitempty"`
 	Status         MilestoneStatus `json:"status"`

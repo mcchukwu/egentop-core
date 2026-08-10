@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/mcchukwu/egentop/internal/apperrors"
+	"github.com/mcchukwu/egentop/pkg/pagination"
 )
 
 type Repository struct {
@@ -35,8 +37,19 @@ func (r *Repository) Create(ctx context.Context, tx *sql.Tx, project *Project) e
 }
 
 // ListByOrganization lists all projects for an organization
-func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID string) ([]Project, error) {
+func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID uuid.UUID, q pagination.Query) ([]Project, int, error) {
 	var projects []Project
+	var total int
+
+	countQuery := `
+		SELECT count(*)
+		FROM projects
+		WHERE organization_id = $1
+	`
+
+	if err := r.DB.QueryRowContext(ctx, countQuery, organizationID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 
 	query := `
 		SELECT
@@ -53,11 +66,12 @@ func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID st
 		FROM projects
 		WHERE organization_id = $1
 		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
 	`
 
-	rows, err := r.DB.QueryContext(ctx, query, organizationID)
+	rows, err := r.DB.QueryContext(ctx, query, organizationID, q.Limit, q.Offset())
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	defer rows.Close()
@@ -67,20 +81,20 @@ func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID st
 
 		err := rows.Scan(&p.ID, &p.OrganizationID, &p.CreatedBy, &p.Name, &p.Description, &p.Status, &p.Priority, &p.DueDate, &p.CreatedAt, &p.UpdatedAt)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 
 		projects = append(projects, p)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return projects, nil
+	return projects, total, nil
 }
 
 // GetProjectByID gets a project by ID
-func (r *Repository) GetByID(ctx context.Context, projectID string) (*Project, error) {
+func (r *Repository) GetByID(ctx context.Context, projectID uuid.UUID) (*Project, error) {
 	query := `
 		SELECT
 			id,
@@ -110,16 +124,22 @@ func (r *Repository) GetByID(ctx context.Context, projectID string) (*Project, e
 	return project, nil
 }
 
-// UpdateStatus updates the status of a project
-func (r *Repository) UpdateStatus(ctx context.Context, tx *sql.Tx, projectID string, status ProjectStatus) error {
+// UpdateDetails updates a project's metadata (name, description, priority,
+// due date and/or status). Nil fields are left unchanged.
+func (r *Repository) UpdateDetails(ctx context.Context, tx *sql.Tx, projectID uuid.UUID, name *string, description *string, priority *ProjectPriority, status *ProjectStatus, dueDate *time.Time) error {
 	query := `
 		UPDATE projects
 		SET
-			status = $1,
-			updated_at = $2
-		WHERE id = $3
+			name = COALESCE($2, name),
+			description = COALESCE($3, description),
+			priority = COALESCE($4, priority),
+			status = COALESCE($5, status),
+			due_date = COALESCE($6, due_date),
+			updated_at = NOW()
+		WHERE id = $1
 	`
-	result, err := tx.ExecContext(ctx, query, status, time.Now().UTC(), projectID)
+
+	result, err := tx.ExecContext(ctx, query, projectID, name, description, priority, status, dueDate)
 	if err != nil {
 		return err
 	}
@@ -165,8 +185,19 @@ func (r *Repository) CreateMilestone(ctx context.Context, tx *sql.Tx, milestone 
 }
 
 // ListMilestonesByProject lists all milestones for a project
-func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, projectID string) ([]Milestone, error) {
+func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, projectID uuid.UUID, q pagination.Query) ([]Milestone, int, error) {
 	var milestones []Milestone
+	var total int
+
+	countQuery := `
+		SELECT count(*)
+		FROM milestones
+		WHERE project_id = $1
+	`
+
+	if err := db.QueryRowContext(ctx, countQuery, projectID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 
 	query := `
 		SELECT
@@ -177,17 +208,20 @@ func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, 
 			description,
 			status,
 			due_date,
+			position,
+			completed_at,
 			created_by,
 			created_at,
 			updated_at
 		FROM milestones
 		WHERE project_id = $1
 		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
 	`
 
-	rows, err := db.QueryContext(ctx, query, projectID)
+	rows, err := db.QueryContext(ctx, query, projectID, q.Limit, q.Offset())
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	defer rows.Close()
@@ -195,22 +229,22 @@ func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, 
 	for rows.Next() {
 		var m Milestone
 
-		err := rows.Scan(&m.ID, &m.ProjectID, &m.OrganizationID, &m.Title, &m.Description, &m.Status, &m.DueDate, &m.CreatedBy, &m.CreatedAt, &m.UpdatedAt)
+		err := rows.Scan(&m.ID, &m.ProjectID, &m.OrganizationID, &m.Title, &m.Description, &m.Status, &m.DueDate, &m.Position, &m.CompletedAt, &m.CreatedBy, &m.CreatedAt, &m.UpdatedAt)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 
 		milestones = append(milestones, m)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return milestones, nil
+	return milestones, total, nil
 }
 
 // GetMilestoneByID gets a milestone by ID
-func (r *Repository) GetMilestoneByID(ctx context.Context, db *sql.DB, milestoneID string) (*Milestone, error) {
+func (r *Repository) GetMilestoneByID(ctx context.Context, db *sql.DB, milestoneID uuid.UUID) (*Milestone, error) {
 	query := `
 		SELECT
 			id,
@@ -220,6 +254,8 @@ func (r *Repository) GetMilestoneByID(ctx context.Context, db *sql.DB, milestone
 			description,
 			status,
 			due_date,
+			position,
+			completed_at,
 			created_by,
 			created_at,
 			updated_at
@@ -229,7 +265,7 @@ func (r *Repository) GetMilestoneByID(ctx context.Context, db *sql.DB, milestone
 
 	milestone := &Milestone{}
 
-	err := db.QueryRowContext(ctx, query, milestoneID).Scan(&milestone.ID, &milestone.ProjectID, &milestone.OrganizationID, &milestone.Title, &milestone.Description, &milestone.Status, &milestone.DueDate, &milestone.CreatedBy, &milestone.CreatedAt, &milestone.UpdatedAt)
+	err := db.QueryRowContext(ctx, query, milestoneID).Scan(&milestone.ID, &milestone.ProjectID, &milestone.OrganizationID, &milestone.Title, &milestone.Description, &milestone.Status, &milestone.DueDate, &milestone.Position, &milestone.CompletedAt, &milestone.CreatedBy, &milestone.CreatedAt, &milestone.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, apperrors.ErrMilestoneNotFound
 	}
@@ -240,17 +276,21 @@ func (r *Repository) GetMilestoneByID(ctx context.Context, db *sql.DB, milestone
 	return milestone, nil
 }
 
-// UpdateMilestoneStatus updates the status of a milestone
-func (r *Repository) UpdateMilestoneStatus(ctx context.Context, tx *sql.Tx, milestoneID string, status MilestoneStatus) error {
+// UpdateMilestoneDetails updates a milestone's metadata (title, description,
+// due date and/or position). Nil fields are left unchanged.
+func (r *Repository) UpdateMilestoneDetails(ctx context.Context, tx *sql.Tx, milestoneID uuid.UUID, title *string, description *string, dueDate *time.Time, position *int) error {
 	query := `
 	UPDATE milestones
 	SET
-		status = $1,
+		title = COALESCE($2, title),
+		description = COALESCE($3, description),
+		due_date = COALESCE($4, due_date),
+		position = COALESCE($5, position),
 		updated_at = NOW()
-	WHERE id = $2
+	WHERE id = $1
 	`
 
-	result, err := tx.ExecContext(ctx, query, status, milestoneID)
+	result, err := tx.ExecContext(ctx, query, milestoneID, title, description, dueDate, position)
 	if err != nil {
 		return err
 	}
@@ -270,7 +310,7 @@ func (r *Repository) UpdateMilestoneStatus(ctx context.Context, tx *sql.Tx, mile
 // --- Tenant Isolation queries ---
 
 // GetByID gets a project by ID
-func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projectID string, organizationID string) (*Project, error) {
+func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projectID uuid.UUID, organizationID uuid.UUID) (*Project, error) {
 	query := `
 		SELECT
 			id,
@@ -302,7 +342,7 @@ func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projec
 }
 
 // GetMilestoneByIDAndOrganization gets a milestone by ID and organization ID
-func (r *Repository) GetMilestoneByIDAndOrganizationID(ctx context.Context, milestoneID string, organizationID string) (*Milestone, error) {
+func (r *Repository) GetMilestoneByIDAndOrganizationID(ctx context.Context, milestoneID uuid.UUID, organizationID uuid.UUID) (*Milestone, error) {
 	query := `
 		SELECT
 			id,
@@ -312,6 +352,8 @@ func (r *Repository) GetMilestoneByIDAndOrganizationID(ctx context.Context, mile
 			description,
 			status,
 			due_date,
+			position,
+			completed_at,
 			created_by,
 			created_at,
 			updated_at
@@ -322,7 +364,7 @@ func (r *Repository) GetMilestoneByIDAndOrganizationID(ctx context.Context, mile
 
 	milestone := &Milestone{}
 
-	err := r.DB.QueryRowContext(ctx, query, milestoneID, organizationID).Scan(&milestone.ID, &milestone.ProjectID, &milestone.OrganizationID, &milestone.Title, &milestone.Description, &milestone.Status, &milestone.DueDate, &milestone.CreatedBy, &milestone.CreatedAt, &milestone.UpdatedAt)
+	err := r.DB.QueryRowContext(ctx, query, milestoneID, organizationID).Scan(&milestone.ID, &milestone.ProjectID, &milestone.OrganizationID, &milestone.Title, &milestone.Description, &milestone.Status, &milestone.DueDate, &milestone.Position, &milestone.CompletedAt, &milestone.CreatedBy, &milestone.CreatedAt, &milestone.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, apperrors.ErrMilestoneNotFound
 	}

@@ -12,14 +12,13 @@ import (
 	"github.com/mcchukwu/egentop/pkg/config"
 )
 
-var cfg = config.Load()
-
 type Handler struct {
 	Service *Service
+	Config  *config.Config
 }
 
-func NewHandler(service *Service) *Handler {
-	return &Handler{Service: service}
+func NewHandler(service *Service, cfg *config.Config) *Handler {
+	return &Handler{Service: service, Config: cfg}
 }
 
 // Register creates a new user account
@@ -65,7 +64,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		Name:     "refresh_token",
 		Value:    refreshToken,
 		HttpOnly: true,
-		Secure:   cfg.AppEnv == "production", // true in production HTTPS
+		Secure:   h.Config.AppEnv == "production", // true in production HTTPS
 		Path:     "/",
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   60 * 60 * 24 * 30,
@@ -107,7 +106,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Name:     "refresh_token",
 		Value:    refreshToken,
 		HttpOnly: true,
-		Secure:   cfg.AppEnv == "production", // true in production HTTPS
+		Secure:   h.Config.AppEnv == "production", // true in production HTTPS
 		Path:     "/",
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   60 * 60 * 24 * 30,
@@ -128,7 +127,13 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, newRefreshToken, err := h.Service.RefreshToken(r.Context(), cookie.Value)
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	accessToken, newRefreshToken, err := h.Service.RefreshToken(r.Context(), userID, cookie.Value)
 	if err != nil {
 		response.HandleError(w, err)
 		return
@@ -139,7 +144,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		Name:     "refresh_token",
 		Value:    newRefreshToken,
 		HttpOnly: true,
-		Secure:   cfg.AppEnv == "production", // true in production HTTPS
+		Secure:   h.Config.AppEnv == "production", // true in production HTTPS
 		Path:     "/",
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   60 * 60 * 24 * 30,
@@ -154,7 +159,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 // Logout invalidates the session
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	// Get session id
-	sessionID, ok := r.Context().Value(requestctx.SessionIDKey).(string)
+	sessionID, ok := requestctx.SessionID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrExpiredToken)
 		return
@@ -172,7 +177,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   cfg.AppEnv == "production", // true in production HTTPS
+		Secure:   h.Config.AppEnv == "production", // true in production HTTPS
 		MaxAge:   -1,
 	})
 
@@ -183,7 +188,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 // LogoutAllDevices revokes all sessions for a user
 func (h *Handler) LogoutAllDevices(w http.ResponseWriter, r *http.Request) {
 	// Find user
-	userID, ok := r.Context().Value(requestctx.UserIDKey).(string)
+	userID, ok := requestctx.UserID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrUserNotFound)
 		return
@@ -201,7 +206,7 @@ func (h *Handler) LogoutAllDevices(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   cfg.AppEnv == "production",
+		Secure:   h.Config.AppEnv == "production",
 		MaxAge:   -1,
 	})
 

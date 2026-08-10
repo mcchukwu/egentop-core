@@ -10,30 +10,34 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/lib/pq"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/audit"
+	"github.com/mcchukwu/egentop/internal/jwt"
 	"github.com/mcchukwu/egentop/internal/membership"
+	"github.com/mcchukwu/egentop/pkg/config"
 	"github.com/mcchukwu/egentop/pkg/db"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type Service struct {
-	DB        *sql.DB
-	JWTSecret []byte
-	Audit     *audit.Service
+	db    *sql.DB
+	audit *audit.Service
+	jwt   *jwt.Manager
+	cfg   *config.Config
 }
 
-func NewService(db *sql.DB, secret []byte, audit *audit.Service) *Service {
+func NewService(db *sql.DB, audit *audit.Service, jwt *jwt.Manager, cfg *config.Config) *Service {
 	return &Service{
-		DB:        db,
-		JWTSecret: secret,
-		Audit:     audit,
+		db:    db,
+		audit: audit,
+		jwt:   jwt,
+		cfg:   cfg,
 	}
 }
 
-// Register creates a new user account and returns an active session
+// Register() creates a new user account and returns an active session
 func (s *Service) Register(ctx context.Context, req RegisterRequest) (string, string, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
@@ -54,8 +58,9 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (string, st
 		return "", "", apperrors.ErrInternalServer
 	}
 
-	err = db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		var userID string
+	// Start transaction
+	err = db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
+		var userID uuid.UUID
 
 		// Create user and get the new user ID
 		err = tx.QueryRowContext(dbCtx, `
@@ -64,54 +69,59 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (string, st
 		RETURNING id
 	`, nullableString(req.Email), nullableString(req.Phone), string(hashedPassword), nullableString(req.FirstName), nullableString(req.LastName)).Scan(&userID)
 		if err != nil {
-			var pqErr *pq.Error
+			var pqErr *pgconn.PgError
 			if errors.As(err, &pqErr) && pqErr.Code == "23505" {
 				switch {
-				case strings.Contains(pqErr.Constraint, "email"):
+				case strings.Contains(pqErr.ConstraintName, "email"):
 					return apperrors.ErrEmailAlreadyExists
-				case strings.Contains(pqErr.Constraint, "phone"):
+				case strings.Contains(pqErr.ConstraintName, "phone"):
 					return apperrors.ErrPhoneAlreadyExists
 				}
 			}
+
 			return apperrors.ErrDatabase
 		}
 
 		// Create organization
 		// TODO: Create random default slug upon organization creation
-		var orgID string
+		var orgID uuid.UUID
 
 		err = tx.QueryRowContext(dbCtx, `
 		INSERT INTO organizations (name)
 		VALUES ($1)
 		RETURNING id
-	`, fmt.Sprintf("%s's Organization", string(req.FirstName))).Scan(&orgID)
+	`, fmt.Sprintf("%s's Organization", req.FirstName)).Scan(&orgID)
 		if err != nil {
 			return apperrors.ErrDatabase
 		}
 
 		// Create membership (owner)
+		ownerRoleID, err := membership.ResolveSystemRoleID(dbCtx, tx, membership.RoleOwner)
+		if err != nil {
+			return err
+		}
+
 		_, err = tx.ExecContext(dbCtx, `
-		INSERT INTO memberships (user_id, organization_id, role, status)
+		INSERT INTO memberships (user_id, organization_id, role_id, status)
 		VALUES ($1, $2, $3, $4)
-	`, userID, orgID, membership.RoleOwner, membership.MembershipStatusActive)
+	`, userID, orgID, ownerRoleID, membership.MembershipStatusActive)
 		if err != nil {
 			return apperrors.ErrDatabase
 		}
 
 		// Create session (auto-login)
-		accessToken, refreshToken, err = createSession(dbCtx, tx, userID, s.JWTSecret)
+		accessToken, refreshToken, err = createSession(dbCtx, tx, userID, s.jwt, s.cfg)
 		if err != nil {
 			return err
 		}
 
 		// Audit log
-		err = s.Audit.Log(dbCtx, tx, audit.LogEntry{
-			OrganizationID: &orgID,
-			UserID:         &userID,
-			Action:         "user.registered",
-			EntityType:     "user",
-			EntityID:       &userID,
-			Metadata:       map[string]any{},
+		err = s.audit.Log(dbCtx, tx, audit.LogEntry{
+			UserID:     &userID,
+			Action:     "user.registered",
+			EntityType: "user",
+			EntityID:   &userID,
+			Metadata:   map[string]any{},
 		})
 		if err != nil {
 			return err
@@ -123,7 +133,7 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (string, st
 	return accessToken, refreshToken, err
 }
 
-// Login validates the user credentials and returns a JWT access token
+// Login() validates the user credentials and returns a JWT access token
 func (s *Service) Login(ctx context.Context, req LoginRequest) (string, string, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
@@ -133,9 +143,13 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (string, string, 
 		err                       error
 	)
 
-	err = db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+	err = db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
 		// detect if identifier is email or phone, query the right column and scan into userID, passwordHash, and status
-		var userID, passwordHash, status string
+		var (
+			userID       uuid.UUID
+			passwordHash string
+			status       string
+		)
 
 		if strings.Contains(req.Identifier, "@") {
 			err = tx.QueryRowContext(dbCtx, `
@@ -170,13 +184,13 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (string, string, 
 		}
 
 		// Create session
-		accessToken, refreshToken, err = createSession(dbCtx, tx, userID, s.JWTSecret)
+		accessToken, refreshToken, err = createSession(dbCtx, tx, userID, s.jwt, s.cfg)
 		if err != nil {
 			return err
 		}
 
 		// Audit Log
-		err = s.Audit.Log(dbCtx, tx, audit.LogEntry{
+		err = s.audit.Log(dbCtx, tx, audit.LogEntry{
 			UserID:     &userID,
 			Action:     "user.logged_in",
 			EntityType: "user",
@@ -193,8 +207,9 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (string, string, 
 	return accessToken, refreshToken, err
 }
 
-// RefreshToken refreshes the session
-func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (string, string, error) {
+// RefreshToken rotates a refresh token within its session lineage. Reusing a
+// revoked token is treated as a theft signal and revokes the whole family.
+func (s *Service) RefreshToken(ctx context.Context, userID uuid.UUID, refreshToken string) (string, string, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -205,53 +220,90 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (string
 		err error
 	)
 
-	err = db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		// Find session
+	// reuseDetected is set when a revoked token is presented; the family
+	// revocation must be committed even though the operation fails.
+	var reuseDetected bool
+
+	err = db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(dbCtx, `
-			SELECT id, refresh_token_hash, user_id
+			SELECT id, token_family_id, refresh_token_hash, revoked
 			FROM sessions
-			WHERE revoked = false
-	`)
+			WHERE user_id = $1
+		`, userID)
 		if err != nil {
 			return apperrors.ErrDatabase
 		}
 
-		// Loop through sessions and find refresh token
-		defer rows.Close()
-
-		var sessionID string
-		var hashedRefreshToken string
-		var userID string
-		var found bool
+		var (
+			sessionID       uuid.UUID
+			familyID        uuid.UUID
+			hashedToken     string
+			revoked         bool
+			foundSessionID  uuid.UUID
+			foundFamilyID   uuid.UUID
+			foundRevoked    bool
+			hasMatch        bool
+		)
 
 		for rows.Next() {
-			err = rows.Scan(&sessionID, &hashedRefreshToken, &userID)
+			err = rows.Scan(&sessionID, &familyID, &hashedToken, &revoked)
 			if err != nil {
 				return apperrors.ErrInternalServer
 			}
 
-			err = bcrypt.CompareHashAndPassword([]byte(hashedRefreshToken), []byte(refreshToken))
+			err = bcrypt.CompareHashAndPassword([]byte(hashedToken), []byte(refreshToken))
 			if err == nil {
-				found = true
+				foundSessionID = sessionID
+				foundFamilyID = familyID
+				foundRevoked = revoked
+				hasMatch = true
 				break
 			}
 		}
 		if rows.Err() != nil {
+			rows.Close()
 			return apperrors.ErrDatabase
 		}
 
-		if !found {
+		rows.Close()
+
+		if !hasMatch {
 			return apperrors.ErrInvalidToken
 		}
 
-		// Revoke old session
+		// Reuse of a revoked token: the token was stolen, revoke the whole family
+		if foundRevoked {
+			_, err = tx.ExecContext(dbCtx, `
+				UPDATE sessions
+				SET revoked = true,
+					revoked_at = NOW()
+				WHERE token_family_id = $1
+				AND revoked = false
+			`, foundFamilyID)
+			if err != nil {
+				return apperrors.ErrDatabase
+			}
+
+			err = s.audit.Log(dbCtx, tx, audit.LogEntry{
+				UserID:   &userID,
+				Action:   "session.family_revoked",
+				Metadata: map[string]any{"reason": "revoked token reuse detected"},
+			})
+			if err != nil {
+				return err
+			}
+
+			reuseDetected = true
+			return nil
+		}
+
+		// Revoke the old session
 		_, err = tx.ExecContext(dbCtx, `
-		UPDATE sessions
-		SET revoked = true,
-	    revoked_at = NOW()
-		WHERE id = $1
-	`,
-			sessionID)
+			UPDATE sessions
+			SET revoked = true,
+				revoked_at = NOW()
+			WHERE id = $1
+		`, foundSessionID)
 		if err != nil {
 			return apperrors.ErrDatabase
 		}
@@ -266,47 +318,31 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (string
 
 		newRefreshToken = hex.EncodeToString(refreshBytes)
 
-		// Hash new refresh token
 		newRefreshTokenHash, err := hashRefreshToken(newRefreshToken)
 		if err != nil {
 			return apperrors.ErrInternalServer
 		}
 
-		// Create new session
-		var newSessionID string
+		// Create new session in the same lineage
+		var newSessionID uuid.UUID
+
 		err = tx.QueryRowContext(dbCtx, `
-		INSERT INTO sessions (user_id, refresh_token_hash, expires_at)
-		VALUES ($1, $2, $3)
-		RETURNING id
-`,
-			userID,
-			newRefreshTokenHash,
-			time.Now().Add(30*24*time.Hour),
-		).Scan(&newSessionID)
+			INSERT INTO sessions (user_id, token_family_id, refresh_token_hash, expires_at)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id
+		`, userID, foundFamilyID, newRefreshTokenHash, time.Now().Add(s.cfg.JWTRefreshTokenTTL)).Scan(&newSessionID)
 		if err != nil {
 			return apperrors.ErrDatabase
 		}
 
-		// Issue new JWT access token
-		newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"user_id":    userID,
-			"session_id": newSessionID,
-			"exp":        time.Now().Add(15 * time.Minute).Unix(),
-		})
-
 		// Sign access token
-		newAccessToken, err = newToken.SignedString(s.JWTSecret)
-		if err != nil {
-			return apperrors.ErrInternalServer
-		}
+		newAccessToken, err = s.jwt.GenerateAccessToken(userID, newSessionID)
 
 		// Audit Log
-		err = s.Audit.Log(dbCtx, tx, audit.LogEntry{
-			UserID:     &userID,
-			Action:     "token.refreshed",
-			EntityType: "user",
-			EntityID:   &userID,
-			Metadata:   map[string]any{},
+		err = s.audit.Log(dbCtx, tx, audit.LogEntry{
+			UserID:   &userID,
+			Action:   "token.refreshed",
+			Metadata: map[string]any{},
 		})
 		if err != nil {
 			return err
@@ -315,32 +351,39 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (string
 		return nil
 	})
 
+	if reuseDetected {
+		return "", "", apperrors.ErrSessionRevoked
+	}
+
 	return newAccessToken, newRefreshToken, err
 }
 
 // Logout revokes sessions for a user's device
-func (s *Service) Logout(ctx context.Context, sessionID string) error {
+func (s *Service) Logout(ctx context.Context, sessionID uuid.UUID) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		var userID string
+	err := db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
+		var userID uuid.UUID
 
 		// Revoke session
-		_, err := tx.ExecContext(dbCtx, `
-		UPDATE sessions
-		SET revoked = true,
-	    revoked_at = NOW()
-		WHERE id = $1
-		RETURNING user_id
-	`,
-			sessionID)
+		err := tx.QueryRowContext(dbCtx, `
+			UPDATE sessions
+			SET revoked = true,
+				revoked_at = NOW()
+			WHERE id = $1
+			RETURNING user_id
+		`, sessionID).Scan(&userID)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return apperrors.ErrSessionRevoked
+			}
+
 			return apperrors.ErrDatabase
 		}
 
 		// Audit Log
-		err = s.Audit.Log(dbCtx, tx, audit.LogEntry{
+		err = s.audit.Log(dbCtx, tx, audit.LogEntry{
 			UserID:     &userID,
 			Action:     "user.logged_out",
 			EntityType: "user",
@@ -358,11 +401,11 @@ func (s *Service) Logout(ctx context.Context, sessionID string) error {
 }
 
 // LogoutAllDevices revokes all sessions for a user
-func (s *Service) LogoutAllDevices(ctx context.Context, userID string) error {
+func (s *Service) LogoutAllDevices(ctx context.Context, userID uuid.UUID) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+	err := db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(dbCtx, `
 		UPDATE sessions
 		SET revoked = true,
@@ -377,7 +420,7 @@ func (s *Service) LogoutAllDevices(ctx context.Context, userID string) error {
 		}
 
 		// Audit Log
-		err = s.Audit.Log(dbCtx, tx, audit.LogEntry{
+		err = s.audit.Log(dbCtx, tx, audit.LogEntry{
 			UserID:     &userID,
 			Action:     "user.logged_out_all_devices",
 			EntityType: "user",
@@ -418,8 +461,8 @@ func nullableString(s string) *string {
 	return &s
 }
 
-// createSession is shared — Login and OAuth both call this
-func createSession(ctx context.Context, tx *sql.Tx, userID string, jwtSecret []byte) (accessToken, refreshToken string, err error) {
+// createSession() creates a session in the database
+func createSession(ctx context.Context, tx *sql.Tx, userID uuid.UUID, jwt *jwt.Manager, cfg *config.Config) (accessToken, refreshToken string, err error) {
 	refreshTokenBytes := make([]byte, 32)
 
 	if _, err = rand.Read(refreshTokenBytes); err != nil {
@@ -433,27 +476,20 @@ func createSession(ctx context.Context, tx *sql.Tx, userID string, jwtSecret []b
 		return "", "", apperrors.ErrInternalServer
 	}
 
-	var sessionID string
+	var sessionID uuid.UUID
 
 	err = tx.QueryRowContext(ctx, `
         INSERT INTO sessions (user_id, refresh_token_hash, expires_at, revoked, created_at)
         VALUES ($1, $2, $3, false, NOW())
         RETURNING id
-    `, userID, string(hashedRefreshToken), time.Now().Add(30*24*time.Hour),
-	).Scan(&sessionID)
+    `, userID, string(hashedRefreshToken), time.Now().Add(cfg.JWTRefreshTokenTTL)).Scan(&sessionID)
 	if err != nil {
 		return "", "", apperrors.ErrDatabase
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":    userID,
-		"session_id": sessionID,
-		"exp":        time.Now().Add(15 * time.Minute).Unix(),
-	})
-
-	accessToken, err = token.SignedString(jwtSecret)
+	accessToken, err = jwt.GenerateAccessToken(userID, sessionID)
 	if err != nil {
-		return "", "", apperrors.ErrInternalServer
+		return "", "", err
 	}
 
 	return accessToken, refreshToken, nil

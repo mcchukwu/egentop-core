@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
@@ -21,25 +23,32 @@ func NewOrgMiddleware(db *sql.DB) *OrgMiddleware {
 
 func (m *OrgMiddleware) LoadOrg(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		orgID := r.PathValue("orgID")
-		if orgID == "" {
+		orgIDStr := r.PathValue("orgID")
+		if orgIDStr == "" {
 			response.HandleError(w, apperrors.ErrInvalidRequestBody)
 			return
 		}
 
+		// parse and validate orgID
+		orgID, err := uuid.Parse(orgIDStr)
+		if err != nil {
+			response.HandleError(w, apperrors.ErrOrganizationIDInvalid)
+			return
+		}
+
+		// get organization status
 		var organizationStatus string
 
-		err := m.DB.QueryRowContext(r.Context(),
+		err = m.DB.QueryRowContext(r.Context(),
 			`
-			SELECT
-				status,
+			SELECT status
 			FROM organizations
 			WHERE id = $1
 			`,
 			orgID,
 		).Scan(&organizationStatus)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if errors.Is(err, sql.ErrNoRows) {
 				response.HandleError(w, apperrors.ErrOrganizationNotFound)
 				return
 			}

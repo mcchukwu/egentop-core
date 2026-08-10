@@ -1,6 +1,10 @@
 package organization
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type OrganizationStatus string
 
@@ -11,10 +15,10 @@ const (
 )
 
 type Organization struct {
-	ID        string
-	Name      string
-	Slug      string
-	Status    OrganizationStatus
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        uuid.UUID          `json:"id"`
+	Name      string             `json:"name"`
+	Slug      string             `json:"slug"`
+	Status    OrganizationStatus `json:"status"`
+	CreatedAt time.Time          `json:"created_at"`
+	UpdatedAt time.Time          `json:"updated_at"`
 }

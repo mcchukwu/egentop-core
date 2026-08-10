@@ -13,9 +13,7 @@ type UpdateProjectRequest struct {
 	Description string          `json:"description" validate:"omitempty,max=2000"`
 	Priority    ProjectPriority `json:"priority" validate:"omitempty"`
 	Status      ProjectStatus   `json:"status" validate:"omitempty"`
-}
-type UpdateProjectStatusInput struct {
-	Status ProjectStatus `json:"status" validate:"required"`
+	DueDate     *time.Time      `json:"due_date" validate:"omitempty"`
 }
 
 type CreateMilestoneInput struct {
@@ -28,7 +26,4 @@ type UpdateMilestoneRequest struct {
 	Description string     `json:"description" validate:"omitempty,max=2000"`
 	DueDate     *time.Time `json:"due_date" validate:"omitempty"`
 	Position    int        `json:"position" validate:"omitempty"`
-}
-type UpdateMilestoneStatusInput struct {
-	Status MilestoneStatus `json:"status" validate:"required"`
 }

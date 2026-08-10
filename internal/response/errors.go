@@ -71,10 +71,18 @@ func HandleError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusForbidden, "forbidden", "access denied")
 	case errors.Is(err, apperrors.ErrSessionExpired):
 		Error(w, http.StatusUnauthorized, "session_expired", "session expired")
+	case errors.Is(err, apperrors.ErrSessionRevoked):
+		Error(w, http.StatusUnauthorized, "session_revoked", "session revoked")
 	case errors.Is(err, apperrors.ErrInvalidToken):
 		Error(w, http.StatusUnauthorized, "invalid_token", "invalid token")
 	case errors.Is(err, apperrors.ErrInvalidPassword):
 		Error(w, http.StatusUnauthorized, "invalid_password", "invalid password")
+	case errors.Is(err, apperrors.ErrEmailNotVerified):
+		Error(w, http.StatusForbidden, "email_not_verified", "email not verified")
+	case errors.Is(err, apperrors.ErrWeakPassword):
+		Error(w, http.StatusBadRequest, "weak_password", "weak password")
+	case errors.Is(err, apperrors.ErrInsufficientPermissions):
+		Error(w, http.StatusForbidden, "insufficient_permissions", "insufficient permissions")
 
 		// USERS
 	case errors.Is(err, apperrors.ErrUserNotFound):
@@ -87,6 +95,28 @@ func HandleError(w http.ResponseWriter, err error) {
 	// ORGS
 	case errors.Is(err, apperrors.ErrOrganizationNotFound):
 		Error(w, http.StatusNotFound, "organization_not_found", "organization not found")
+	case errors.Is(err, apperrors.ErrOrganizationSuspended):
+		Error(w, http.StatusForbidden, "organization_suspended", "organization suspended")
+
+	// MEMBERSHIPS
+	case errors.Is(err, apperrors.ErrMembershipNotFound):
+		Error(w, http.StatusNotFound, "membership_not_found", "membership not found")
+	case errors.Is(err, apperrors.ErrAlreadyMember):
+		Error(w, http.StatusConflict, "already_member", "user already belongs to organization")
+	case errors.Is(err, apperrors.ErrInvitationPending):
+		Error(w, http.StatusConflict, "invitation_pending", "invitation already pending")
+
+	// PROJECTS / MILESTONES / ASSIGNMENTS
+	case errors.Is(err, apperrors.ErrProjectNotFound):
+		Error(w, http.StatusNotFound, "project_not_found", "project not found")
+	case errors.Is(err, apperrors.ErrMilestoneNotFound):
+		Error(w, http.StatusNotFound, "milestone_not_found", "milestone not found")
+	case errors.Is(err, apperrors.ErrAssignmentNotFound):
+		Error(w, http.StatusNotFound, "assignment_not_found", "assignment not found")
+	case errors.Is(err, apperrors.ErrInvalidStatusTransition):
+		Error(w, http.StatusBadRequest, "invalid_status_transition", "invalid status transition")
+	case errors.Is(err, apperrors.ErrInvalidDueDate):
+		Error(w, http.StatusBadRequest, "invalid_due_date", "invalid due date")
 
 	// VALIDATION
 	case errors.Is(err, apperrors.ErrValidation):

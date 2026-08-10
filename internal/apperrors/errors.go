@@ -43,6 +43,8 @@ var (
 	ErrUserIdentifierInvalid = errors.New("phone or email is invalid")
 
 	// ORGANIZATIONS
+	ErrOrganizationIDInvalid = errors.New("organization id is invalid")
+
 	ErrOrganizationNotFound = errors.New("organization not found")
 
 	ErrOrganizationSuspended = errors.New("organization suspended")
@@ -90,6 +92,9 @@ var (
 	ErrInvalidMilestonePriority = errors.New("invalid milestone priority")
 
 	ErrInvalidDueDate = errors.New("invalid due date")
+
+	// ASSIGNMENTS
+	ErrAssignmentNotFound = errors.New("assignment not found")
 
 	// VALIDATION
 	ErrValidation = errors.New("validation error")

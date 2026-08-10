@@ -8,9 +8,10 @@ const (
 	UserIDKey         contextKey = "user_id"
 	SessionIDKey      contextKey = "session_id"
 	OrganizationIDKey contextKey = "organization_id"
-	RequestIDKey      contextKey = "request_id"
 	MembershipIDKey   contextKey = "membership_id"
-	RoleKey           contextKey = "role"
+
+	RequestIDKey contextKey = "request_id"
+	RoleKey      contextKey = "role"
 )
 
 func set(ctx context.Context, key contextKey, value any) context.Context {

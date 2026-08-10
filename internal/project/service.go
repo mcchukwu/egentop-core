@@ -3,13 +3,14 @@ package project
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/mcchukwu/egentop/internal/activity"
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/audit"
 	"github.com/mcchukwu/egentop/pkg/db"
+	"github.com/mcchukwu/egentop/pkg/pagination"
 )
 
 type Service struct {
@@ -29,7 +30,7 @@ func NewService(db *sql.DB, repo *Repository, auditService *audit.Service, activ
 }
 
 // CreateProject creates a new project
-func (s *Service) Create(ctx context.Context, createdBy string, organizationID string, req CreateProjectRequest) (*Project, error) {
+func (s *Service) Create(ctx context.Context, createdBy uuid.UUID, organizationID uuid.UUID, req CreateProjectRequest) (*Project, error) {
 	priority := ProjectPriorityMedium
 	var dueDate *time.Time
 
@@ -44,12 +45,7 @@ func (s *Service) Create(ctx context.Context, createdBy string, organizationID s
 	}
 
 	if req.DueDate != nil {
-		parsed, err := time.Parse(time.RFC3339, req.DueDate.String())
-		if err != nil {
-			return nil, apperrors.ErrValidation
-		}
-
-		dueDate = &parsed
+		dueDate = req.DueDate
 	}
 
 	project := &Project{
@@ -105,63 +101,111 @@ func (s *Service) Create(ctx context.Context, createdBy string, organizationID s
 }
 
 // ListProjects lists all projects for an organization
-func (s *Service) ListByOrganizationID(ctx context.Context, organizationID string) ([]Project, error) {
+func (s *Service) ListByOrganizationID(ctx context.Context, organizationID uuid.UUID, q pagination.Query) ([]Project, pagination.Meta, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	return s.Repo.ListByOrganizationID(dbCtx, organizationID)
+	projects, total, err := s.Repo.ListByOrganizationID(dbCtx, organizationID, q)
+	if err != nil {
+		return nil, pagination.Meta{}, err
+	}
+
+	return projects, pagination.NewMeta(q, total), nil
 }
 
 // GetProjectByID gets a project by ID
-func (s *Service) GetByID(ctx context.Context, projectID string) (*Project, error) {
+func (s *Service) GetByID(ctx context.Context, projectID uuid.UUID) (*Project, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
 	return s.Repo.GetByID(dbCtx, projectID)
 }
 
-// UpdateProjectStatus updates the status of a project
-func (s *Service) UpdateStatus(ctx context.Context, userID string, organizationID string, projectID string, status ProjectStatus) error {
+// Update updates a project's metadata (name, description, priority, due date
+// and/or status). Fields left empty in the request are unchanged.
+func (s *Service) Update(ctx context.Context, userID uuid.UUID, organizationID uuid.UUID, projectID uuid.UUID, req UpdateProjectRequest) (*Project, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
+	var updated *Project
+
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		// Verify if project belong to actor organization
+		// Verify the project belongs to the actor organization
 		project, err := s.ensureProjectAccess(dbCtx, projectID, organizationID)
 		if err != nil {
 			return err
 		}
 
-		// Validate status transition
-		err = validateProjectStatusTransition(project.Status, status)
-		if err != nil {
-			return err
+		oldStatus := project.Status
+
+		var name *string
+		var description *string
+		var priority *ProjectPriority
+		var status *ProjectStatus
+		var dueDate *time.Time
+
+		if req.Name != "" {
+			name = &req.Name
+		}
+		if req.Description != "" {
+			description = &req.Description
+		}
+		if req.Priority != "" {
+			p := ProjectPriority(req.Priority)
+			switch p {
+			case ProjectPriorityLow, ProjectPriorityMedium, ProjectPriorityHigh:
+				priority = &p
+			default:
+				return apperrors.ErrInvalidProjectPriority
+			}
+		}
+		if req.Status != "" {
+			st := ProjectStatus(req.Status)
+			if err := validateProjectStatusTransition(oldStatus, st); err != nil {
+				return err
+			}
+			status = &st
+		}
+		if req.DueDate != nil {
+			dueDate = req.DueDate
 		}
 
-		// Update project status
-		err = s.Repo.UpdateStatus(dbCtx, tx, projectID, status)
-		if err != nil {
+		if err := s.Repo.UpdateDetails(dbCtx, tx, projectID, name, description, priority, status, dueDate); err != nil {
 			return err
 		}
 
 		// Audit log
+		metadata := map[string]any{"project_id": projectID}
+		if name != nil {
+			metadata["new_name"] = *name
+		}
+		if priority != nil {
+			metadata["old_priority"] = project.Priority
+			metadata["new_priority"] = *priority
+		}
+		if status != nil {
+			metadata["old_status"] = oldStatus
+			metadata["new_status"] = *status
+		}
+		if dueDate != nil {
+			metadata["new_due_date"] = dueDate.String()
+		}
+
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
 			OrganizationID: &organizationID,
 			UserID:         &userID,
-			Action:         "project.status_changed",
-			Metadata: map[string]any{
-				"project_id": project.ID,
-				"old_status": project.Status,
-				"new_status": status,
-			},
+			Action:         "project.updated",
+			EntityType:     "project",
+			EntityID:       &projectID,
+			Metadata:       metadata,
 		})
 		if err != nil {
 			return err
 		}
 
 		// Log activity
-		activity := activity.NewActivity(organizationID, userID, &project.ID, nil, activity.ActivityProjectStatusChanged, fmt.Sprintf("Project '%s' status changed to '%s'", project.Name, status), map[string]any{
-			"project_id": &project.ID,
+		activity := activity.NewActivity(organizationID, userID, &projectID, nil, activity.ActivityProjectUpdated, "Project updated", map[string]any{
+			"project_id": &projectID,
 			"name":       &project.Name,
 		})
 		if err := s.ActivityService.Log(dbCtx, tx, activity); err != nil {
@@ -170,12 +214,19 @@ func (s *Service) UpdateStatus(ctx context.Context, userID string, organizationI
 
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
-	return err
+	if updated == nil {
+		return s.GetByID(ctx, projectID)
+	}
+
+	return updated, nil
 }
 
 // CreateMilestone creates a new milestone
-func (s *Service) CreateMilestone(ctx context.Context, organizationID string, projectID string, userID string, input CreateMilestoneInput) (*Milestone, error) {
+func (s *Service) CreateMilestone(ctx context.Context, organizationID uuid.UUID, projectID uuid.UUID, userID uuid.UUID, input CreateMilestoneInput) (*Milestone, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -183,11 +234,7 @@ func (s *Service) CreateMilestone(ctx context.Context, organizationID string, pr
 	var dueDate *time.Time
 
 	if input.DueDate != nil {
-		parsed, err := time.Parse(time.RFC3339, input.DueDate.String())
-		if err != nil {
-			return nil, apperrors.ErrInvalidDueDate
-		}
-		dueDate = &parsed
+		dueDate = input.DueDate
 	}
 
 	milestone := &Milestone{
@@ -248,66 +295,94 @@ func (s *Service) CreateMilestone(ctx context.Context, organizationID string, pr
 }
 
 // ListMilestones lists all milestones for a project
-func (s *Service) ListMilestonesByProjectID(ctx context.Context, projectID string) ([]Milestone, error) {
+func (s *Service) ListMilestonesByProjectID(ctx context.Context, projectID uuid.UUID, q pagination.Query) ([]Milestone, pagination.Meta, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	return s.Repo.ListMilestonesByProjectID(dbCtx, s.DB, projectID)
+	milestones, total, err := s.Repo.ListMilestonesByProjectID(dbCtx, s.DB, projectID, q)
+	if err != nil {
+		return nil, pagination.Meta{}, err
+	}
+
+	return milestones, pagination.NewMeta(q, total), nil
 }
 
 // GetMilestoneByID gets a milestone by ID
-func (s *Service) GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error) {
+func (s *Service) GetMilestoneByID(ctx context.Context, milestoneID uuid.UUID) (*Milestone, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
 	return s.Repo.GetMilestoneByID(dbCtx, s.DB, milestoneID)
 }
 
-// UpdateMilestoneStatus updates the status of a milestone
-func (s *Service) UpdateMilestoneStatus(ctx context.Context, orgID string, userID string, milestoneID string, status MilestoneStatus) error {
+// Update updates a milestone's metadata (title, description, due date and/or
+// position). Fields left empty in the request are unchanged.
+func (s *Service) UpdateMilestone(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, milestoneID uuid.UUID, req UpdateMilestoneRequest) (*Milestone, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
+	var updated *Milestone
+
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		// Verify if milestone belong to actor organization
+		// Verify the milestone belongs to the actor organization
 		milestone, err := s.ensureMilestoneAccess(dbCtx, milestoneID, orgID)
 		if err != nil {
 			return err
 		}
 
-		// Validate status transition
-		err = validateMilestoneStatusTransition(milestone.Status, status)
-		if err != nil {
-			return err
+		var title *string
+		var description *string
+		var dueDate *time.Time
+		var position *int
+
+		if req.Title != "" {
+			title = &req.Title
+		}
+		if req.Description != "" {
+			description = &req.Description
+		}
+		if req.DueDate != nil {
+			dueDate = req.DueDate
+		}
+		if req.Position != 0 {
+			position = &req.Position
 		}
 
-		// Update milestone status
-		err = s.Repo.UpdateMilestoneStatus(dbCtx, tx, milestone.ID, status)
-		if err != nil {
+		if title == nil && description == nil && dueDate == nil && position == nil {
+			updated = milestone
+			return nil
+		}
+
+		if err := s.Repo.UpdateMilestoneDetails(dbCtx, tx, milestoneID, title, description, dueDate, position); err != nil {
 			return err
 		}
 
 		// Audit log
+		metadata := map[string]any{"milestone_id": milestoneID}
+		if title != nil {
+			metadata["old_title"] = milestone.Title
+			metadata["new_title"] = *title
+		}
+		if dueDate != nil {
+			metadata["new_due_date"] = dueDate.String()
+		}
+
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
 			OrganizationID: &orgID,
 			UserID:         &userID,
-			Action:         "milestone.status_changed",
+			Action:         "milestone.updated",
 			EntityType:     "milestone",
 			EntityID:       &milestoneID,
-			Metadata: map[string]any{
-				"milestone_id": milestone.ID,
-				"old_status":   milestone.Status,
-				"new_status":   status,
-			},
+			Metadata:       metadata,
 		})
 		if err != nil {
 			return err
 		}
 
 		// Log activity
-		activity := activity.NewActivity(orgID, userID, &milestone.ProjectID, &milestone.ID, activity.ActivityMilestoneStatusChanged, fmt.Sprintf("Milestone '%s' status changed to '%s'", milestone.Title, status), map[string]any{
+		activity := activity.NewActivity(orgID, userID, &milestone.ProjectID, &milestoneID, activity.ActivityMilestoneUpdated, "Milestone updated", map[string]any{
 			"project_id":   &milestone.ProjectID,
-			"milestone_id": &milestone.ID,
+			"milestone_id": &milestoneID,
 			"title":        &milestone.Title,
 		})
 		if err := s.ActivityService.Log(dbCtx, tx, activity); err != nil {
@@ -316,21 +391,28 @@ func (s *Service) UpdateMilestoneStatus(ctx context.Context, orgID string, userI
 
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
-	return err
+	if updated == nil {
+		return s.GetMilestoneByID(ctx, milestoneID)
+	}
+
+	return updated, nil
 }
 
 // --- Helpers ---
 
 // Eusure project is accessible by the user
-func (s *Service) ensureProjectAccess(ctx context.Context, projectID string, organizationID string) (*Project, error) {
+func (s *Service) ensureProjectAccess(ctx context.Context, projectID uuid.UUID, organizationID uuid.UUID) (*Project, error) {
 	project, err := s.Repo.GetProjectByIDAndOrganizationID(ctx, projectID, organizationID)
 
 	return project, err
 }
 
 // Ensure milestone is accessible by the user
-func (s *Service) ensureMilestoneAccess(ctx context.Context, milestoneID string, organizationID string) (*Milestone, error) {
+func (s *Service) ensureMilestoneAccess(ctx context.Context, milestoneID uuid.UUID, organizationID uuid.UUID) (*Milestone, error) {
 	milestone, err := s.Repo.GetMilestoneByIDAndOrganizationID(ctx, milestoneID, organizationID)
 
 	return milestone, err

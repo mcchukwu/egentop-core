@@ -1,16 +1,20 @@
 package requestctx
 
-import "context"
+import (
+	"context"
 
-func WithUserID(ctx context.Context, userID string) context.Context {
+	"github.com/google/uuid"
+)
+
+func WithUserID(ctx context.Context, userID uuid.UUID) context.Context {
 	return set(ctx, UserIDKey, userID)
 }
 
-func WithSessionID(ctx context.Context, sessionID string) context.Context {
+func WithSessionID(ctx context.Context, sessionID uuid.UUID) context.Context {
 	return set(ctx, SessionIDKey, sessionID)
 }
 
-func WithOrganizationID(ctx context.Context, organizationID string) context.Context {
+func WithOrganizationID(ctx context.Context, organizationID uuid.UUID) context.Context {
 	return set(ctx, OrganizationIDKey, organizationID)
 }
 
@@ -18,7 +22,7 @@ func WithRequestID(ctx context.Context, requestID string) context.Context {
 	return set(ctx, RequestIDKey, requestID)
 }
 
-func WithMembershipID(ctx context.Context, membershipID any) context.Context {
+func WithMembershipID(ctx context.Context, membershipID uuid.UUID) context.Context {
 	return set(ctx, MembershipIDKey, membershipID)
 }
 

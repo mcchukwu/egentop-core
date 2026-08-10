@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/google/uuid"
 	"github.com/mcchukwu/egentop/internal/apperrors"
+	"github.com/mcchukwu/egentop/pkg/pagination"
 )
 
 type Service struct {
@@ -19,7 +21,7 @@ func NewService(repo *Repository) *Service {
 
 // Log logs an activity
 func (s *Service) Log(ctx context.Context, tx *sql.Tx, entry LogActivityEntry) error {
-	if entry.OrganizationID == "" {
+	if entry.OrganizationID == uuid.Nil {
 		return apperrors.ErrInvalidRequestBody
 	}
 
@@ -54,8 +56,18 @@ func (s *Service) Log(ctx context.Context, tx *sql.Tx, entry LogActivityEntry) e
 	return s.Repo.Create(ctx, tx, activity)
 }
 
+// List returns the activity feed for an organization, newest first.
+func (s *Service) List(ctx context.Context, orgID uuid.UUID, q pagination.Query) ([]Activity, pagination.Meta, error) {
+	activities, total, err := s.Repo.List(ctx, orgID, q)
+	if err != nil {
+		return nil, pagination.Meta{}, err
+	}
+
+	return activities, pagination.NewMeta(q, total), nil
+}
+
 // NewActivity builds a new activity
-func NewActivity(orgID string, actorID string, projectID *string, milestoneID *string, activityType string, message string, metadata map[string]any) LogActivityEntry {
+func NewActivity(orgID uuid.UUID, actorID uuid.UUID, projectID *uuid.UUID, milestoneID *uuid.UUID, activityType string, message string, metadata map[string]any) LogActivityEntry {
 	return LogActivityEntry{
 		OrganizationID: orgID,
 		ProjectID:      projectID,

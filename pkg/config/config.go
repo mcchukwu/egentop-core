@@ -4,8 +4,8 @@ import (
 	"errors"
 	"log"
 	"os"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -19,8 +19,10 @@ type Config struct {
 
 	JWTSecret string
 
-	AccessTokenTTLMinutes int
-	RefreshTokenTTLHours  int
+	JWTAccessTokenTTL  time.Duration
+	JWTRefreshTokenTTL time.Duration
+
+	RequireEmailVerification bool
 
 	CORSAllowedOrigins []string
 }
@@ -32,24 +34,25 @@ func Load() *Config {
 		log.Println(".env file not found")
 	}
 
-	accessTokenTTLMinutes, err := strconv.Atoi(getEnv("ACCESS_TOKEN_TTL_MINUTES", "15"))
+	accessTokenTTL, err := time.ParseDuration(getEnv("JWT_ACCESS_TTL", "15m"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	refreshTokenTTLHours, err := strconv.Atoi(getEnv("REFRESH_TOKEN_TTL_HOURS", "24"))
+	refreshTokenTTL, err := time.ParseDuration(getEnv("JWT_REFRESH_TTL", "720h"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	return &Config{
-		AppEnv:                getEnv("APP_ENV", ""),
-		AppPort:               getEnv("APP_PORT", "8080"),
-		DBURL:                 getEnv("DB_URL", ""),
-		JWTSecret:             getEnv("JWT_SECRET", ""),
-		AccessTokenTTLMinutes: accessTokenTTLMinutes,
-		RefreshTokenTTLHours:  refreshTokenTTLHours,
-		CORSAllowedOrigins:    strings.Split(getEnv("CORS_ALLOWED_ORIGINS", ""), ","),
+		AppEnv:                   getEnv("APP_ENV", ""),
+		AppPort:                  getEnv("APP_PORT", "8080"),
+		DBURL:                    getEnv("DB_URL", ""),
+		JWTSecret:                getEnv("JWT_SECRET", ""),
+		JWTAccessTokenTTL:        accessTokenTTL,
+		JWTRefreshTokenTTL:       refreshTokenTTL,
+		RequireEmailVerification: getEnv("REQUIRE_EMAIL_VERIFICATION", "false") == "true",
+		CORSAllowedOrigins:       strings.Split(getEnv("CORS_ALLOWED_ORIGINS", ""), ","),
 	}
 }
 
