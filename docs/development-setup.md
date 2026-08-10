@@ -34,20 +34,19 @@ Edit `.env`:
 docker compose up -d
 ```
 
-This starts `postgres:16-alpine` exposed on `DB_PORT` (default `5432`) with a
-named volume so data survives container restarts.
+This starts PostgreSQL (see `compose.yaml`, `postgres:18`) exposed on `DB_PORT`
+(default `5432`) with a named volume so data survives container restarts.
 
 ### 4. Apply migrations
 
 ```bash
-cat migrations/*.up.sql | docker compose exec -T db psql -U user -d egentop
+make migrate-up
 ```
 
-Use the `DB_USER`/`DB_NAME` values from your `.env` instead of `user`/`egentop`
-if you changed them. Apply migrations in numeric order (`000001`, `000002`,
-`000003`). The wildcard above already sorts them that way.
+This uses the `migrate` CLI to apply `migrations/*.up.sql` in numeric order
+(`000001`, `000002`, `000003`) to the database in your `.env`.
 
-To roll back, apply the matching `.down.sql` files in reverse numeric order.
+To roll back, run `make migrate-down` (one step at a time).
 
 ### 5. Run the server
 
@@ -81,10 +80,12 @@ The integration tests expect a schema that matches the migrations. Create the
 test database and apply the up migrations first:
 
 ```bash
-docker compose exec -T db psql -U user -d egentop \
+docker compose exec -T postgres psql -U miracle -d egentop_db \
   -c 'CREATE DATABASE egentop_test;'
-cat migrations/*.up.sql | docker compose exec -T db psql -U user -d egentop_test
+cat migrations/*.up.sql | docker compose exec -T postgres psql -U miracle -d egentop_test
 ```
+
+Adjust `-U`/`-d` to your `.env` `DB_USER`/`DB_NAME`.
 
 ### Resetting the test database
 
@@ -101,7 +102,7 @@ CREATE SCHEMA public;
 then re-apply:
 
 ```bash
-cat migrations/*.up.sql | docker compose exec -T db psql -U user -d egentop_test
+cat migrations/*.up.sql | docker compose exec -T postgres psql -U miracle -d egentop_test
 ```
 
 ## Verify Before Pushing
@@ -116,7 +117,7 @@ go test -count=1 ./...
 
 | Task | Command |
 |------|---------|
-| Tail API logs | `docker compose logs -f db` (for the DB) |
-| Drop into psql | `docker compose exec db psql -U user -d egentop` |
-| List tables | `docker compose exec db psql -U user -d egentop -c '\dt'` |
+| Tail API logs | `docker compose logs -f postgres` (for the DB) |
+| Drop into psql | `docker compose exec postgres psql -U miracle -d egentop_db` |
+| List tables | `docker compose exec postgres psql -U miracle -d egentop_db -c '\dt'` |
 | Reset database volume | `docker compose down -v && docker compose up -d` |

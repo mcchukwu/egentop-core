@@ -72,11 +72,20 @@ docker compose up -d
 
 ### Apply Migrations
 
+With the `migrate` CLI installed:
+
 ```bash
-cat migrations/*.up.sql | docker compose exec -T db psql -U user -d egentop
+make migrate-up
 ```
 
-Replace `user`/`egentop` with the `DB_USER`/`DB_NAME` values from your `.env`.
+This applies `migrations/*.up.sql` in order to the database in your `.env`.
+
+Alternatively, pipe the SQL into the container (adjust `-U`/`-d` to your
+`DB_USER`/`DB_NAME`):
+
+```bash
+cat migrations/*.up.sql | docker compose exec -T postgres psql -U miracle -d egentop_db
+```
 
 ### Run
 
