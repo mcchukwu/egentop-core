@@ -107,7 +107,6 @@ The server listens on `:8080` by default (or `APP_PORT`).
 | `JWT_SECRET` | — | JWT signing secret, **at least 32 characters** |
 | `JWT_ACCESS_TTL` | `15m` | Access token lifetime (Go duration) |
 | `JWT_REFRESH_TTL` | `720h` | Refresh token lifetime (Go duration) |
-| `REQUIRE_EMAIL_VERIFICATION` | `false` | Require verified email before password change |
 | `CORS_ALLOWED_ORIGINS` | — | Comma-separated allowed origins (required) |
 
 ## Project Structure

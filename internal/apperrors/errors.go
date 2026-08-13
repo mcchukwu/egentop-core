@@ -34,8 +34,6 @@ var (
 
 	ErrPhoneAlreadyExists = errors.New("phone already exists")
 
-	ErrEmailNotVerified = errors.New("email not verified")
-
 	ErrPhoneNotVerified = errors.New("phone not verified")
 
 	ErrUserSuspended = errors.New("user suspended")

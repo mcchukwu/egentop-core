@@ -22,8 +22,6 @@ type Config struct {
 	JWTAccessTokenTTL  time.Duration
 	JWTRefreshTokenTTL time.Duration
 
-	RequireEmailVerification bool
-
 	CORSAllowedOrigins []string
 }
 
@@ -45,14 +43,13 @@ func Load() *Config {
 	}
 
 	return &Config{
-		AppEnv:                   getEnv("APP_ENV", ""),
-		AppPort:                  getEnv("APP_PORT", "8080"),
-		DBURL:                    getEnv("DB_URL", ""),
-		JWTSecret:                getEnv("JWT_SECRET", ""),
-		JWTAccessTokenTTL:        accessTokenTTL,
-		JWTRefreshTokenTTL:       refreshTokenTTL,
-		RequireEmailVerification: getEnv("REQUIRE_EMAIL_VERIFICATION", "false") == "true",
-		CORSAllowedOrigins:       strings.Split(getEnv("CORS_ALLOWED_ORIGINS", ""), ","),
+		AppEnv:             getEnv("APP_ENV", ""),
+		AppPort:            getEnv("APP_PORT", "8080"),
+		DBURL:              getEnv("DB_URL", ""),
+		JWTSecret:          getEnv("JWT_SECRET", ""),
+		JWTAccessTokenTTL:  accessTokenTTL,
+		JWTRefreshTokenTTL: refreshTokenTTL,
+		CORSAllowedOrigins: strings.Split(getEnv("CORS_ALLOWED_ORIGINS", ""), ","),
 	}
 }
 

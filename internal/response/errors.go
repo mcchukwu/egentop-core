@@ -77,8 +77,6 @@ func HandleError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusUnauthorized, "invalid_token", "invalid token")
 	case errors.Is(err, apperrors.ErrInvalidPassword):
 		Error(w, http.StatusUnauthorized, "invalid_password", "invalid password")
-	case errors.Is(err, apperrors.ErrEmailNotVerified):
-		Error(w, http.StatusForbidden, "email_not_verified", "email not verified")
 	case errors.Is(err, apperrors.ErrWeakPassword):
 		Error(w, http.StatusBadRequest, "weak_password", "weak password")
 	case errors.Is(err, apperrors.ErrInsufficientPermissions):

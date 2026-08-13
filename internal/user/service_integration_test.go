@@ -35,8 +35,8 @@ func integrationDB(t *testing.T) *sql.DB {
 	return db
 }
 
-func newTestService(db *sql.DB, requireEmailVerification bool) *Service {
-	cfg := &config.Config{RequireEmailVerification: requireEmailVerification}
+func newTestService(db *sql.DB) *Service {
+	cfg := &config.Config{}
 	return NewService(db, NewRepository(db), audit.NewService(db), cfg)
 }
 
@@ -85,7 +85,7 @@ func TestGetProfile(t *testing.T) {
 	defer db.Close()
 
 	ctx := context.Background()
-	svc := newTestService(db, false)
+	svc := newTestService(db)
 	s := seedUser(t, db, "profile-"+uuid.NewString()+"@example.com", false)
 
 	u, err := svc.GetProfile(ctx, s.UserID)
@@ -102,7 +102,7 @@ func TestUpdateProfile(t *testing.T) {
 	defer db.Close()
 
 	ctx := context.Background()
-	svc := newTestService(db, false)
+	svc := newTestService(db)
 	s := seedUser(t, db, "update-"+uuid.NewString()+"@example.com", false)
 
 	u, err := svc.UpdateProfile(ctx, s.UserID, UpdateProfileRequest{
@@ -122,7 +122,7 @@ func TestChangePasswordGates(t *testing.T) {
 	defer db.Close()
 
 	ctx := context.Background()
-	svc := newTestService(db, false)
+	svc := newTestService(db)
 
 	s := seedUser(t, db, "cp-"+uuid.NewString()+"@example.com", true)
 
@@ -145,21 +145,6 @@ func TestChangePasswordGates(t *testing.T) {
 			t.Fatalf("expected ErrWeakPassword, got %v", err)
 		}
 	})
-
-	t.Run("unverified email blocked when gate enabled", func(t *testing.T) {
-		db2 := integrationDB(t)
-		defer db2.Close()
-		svc2 := newTestService(db2, true)
-
-		s2 := seedUser(t, db2, "unverified-"+uuid.NewString()+"@example.com", false)
-		err := svc2.ChangePassword(ctx, s2.UserID, s2.SessionID, ChangePasswordRequest{
-			CurrentPassword: s2.Password,
-			NewPassword:     "new-password-456",
-		})
-		if !errors.Is(err, apperrors.ErrEmailNotVerified) {
-			t.Fatalf("expected ErrEmailNotVerified, got %v", err)
-		}
-	})
 }
 
 func TestChangePasswordSuccessRevokesOtherSessions(t *testing.T) {
@@ -167,7 +152,7 @@ func TestChangePasswordSuccessRevokesOtherSessions(t *testing.T) {
 	defer db.Close()
 
 	ctx := context.Background()
-	svc := newTestService(db, false)
+	svc := newTestService(db)
 	s := seedUser(t, db, "revoke-"+uuid.NewString()+"@example.com", true)
 
 	// add a second active session for the same user

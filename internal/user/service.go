@@ -57,8 +57,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID uuid.UUID, req Updat
 }
 
 // ChangePassword changes the password for the authenticated user. The user
-// must supply their current password; when the configured email-verification
-// gate is enabled, accounts with an email are required to have it verified.
+// must supply their current password.
 // All other sessions are revoked on success.
 func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, currentSessionID uuid.UUID, req ChangePasswordRequest) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
@@ -75,17 +74,6 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, currentS
 
 	if req.CurrentPassword == req.NewPassword {
 		return apperrors.ErrWeakPassword
-	}
-
-	if s.cfg.RequireEmailVerification {
-		verified, err := s.repo.GetEmailVerified(dbCtx, userID)
-		if err != nil {
-			return err
-		}
-
-		if !verified {
-			return apperrors.ErrEmailNotVerified
-		}
 	}
 
 	newHash, err := hashPassword(req.NewPassword)

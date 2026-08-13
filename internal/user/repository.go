@@ -126,26 +126,6 @@ func (r *Repository) GetPasswordHash(ctx context.Context, userID uuid.UUID) (*st
 	return &hash, nil
 }
 
-// GetEmailVerified returns the email_verified flag for a user.
-func (r *Repository) GetEmailVerified(ctx context.Context, userID uuid.UUID) (bool, error) {
-	var verified bool
-
-	err := r.DB.QueryRowContext(ctx, `
-		SELECT email_verified
-		FROM users
-		WHERE id = $1
-	`, userID).Scan(&verified)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, apperrors.ErrUserNotFound
-		}
-
-		return false, apperrors.ErrDatabase
-	}
-
-	return verified, nil
-}
-
 // UpdatePasswordHash sets a new password hash for a user.
 func (r *Repository) UpdatePasswordHash(ctx context.Context, userID uuid.UUID, hash string) error {
 	result, err := r.DB.ExecContext(ctx, `

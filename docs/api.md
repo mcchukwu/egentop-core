@@ -252,7 +252,7 @@ Response `200`:
 }
 ```
 
-Errors: `400` `validation_error`, `401` `invalid_password`, `403` `email_not_verified`.
+Errors: `400` `validation_error`, `401` `invalid_password`.
 
 ---
 
@@ -685,7 +685,6 @@ written to the `authz_decisions` table.
 | 401 | `session_revoked` | Session was revoked |
 | 403 | `forbidden` | Authenticated but not allowed |
 | 403 | `insufficient_permissions` | Role lacks the required permission |
-| 403 | `email_not_verified` | Email verification required first |
 | 403 | `organization_suspended` | Organization is suspended |
 | 404 | `organization_not_found` | Organization does not exist or is inactive |
 | 404 | `membership_not_found` | No membership for this user in the org |

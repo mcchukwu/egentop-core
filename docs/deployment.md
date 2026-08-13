@@ -25,7 +25,6 @@ Set these in the environment (never commit secrets):
 | `JWT_SECRET` | Long random secret, >= 32 chars |
 | `JWT_ACCESS_TTL` | e.g. `15m` |
 | `JWT_REFRESH_TTL` | e.g. `720h` |
-| `REQUIRE_EMAIL_VERIFICATION` | `true` if email verification is required |
 | `CORS_ALLOWED_ORIGINS` | Your dashboard origin(s), comma-separated |
 | `LOG_LEVEL` | `info` |
 
