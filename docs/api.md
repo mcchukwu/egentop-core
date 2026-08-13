@@ -65,6 +65,9 @@ this shape:
 - Bearer token: `Authorization: Bearer <access_token>` for every protected route.
 - Refresh token: `refresh_token` HttpOnly cookie, set on register/login and
   rotated on every refresh.
+- `POST /v1/auth/refresh`, `POST /v1/auth/logout` and `POST /v1/auth/logout-all`
+  authenticate solely via the `refresh_token` cookie and work with an expired
+  or absent access token.
 - `GET /v1/me`, `GET /v1/orgs` and `POST /v1/orgs` require only a valid access
   token. All other `/v1/orgs/{orgID}/...` routes additionally require an active
   membership in that organization and a role holding the required permission
@@ -169,19 +172,24 @@ Response `200`:
 Errors: `401` `invalid_token` / `session_revoked`.
 
 ### POST /v1/auth/logout
-Revokes the current session and clears the `refresh_token` cookie.
+Revokes the session referenced by the `refresh_token` cookie and clears the
+cookie. Authenticated solely by the cookie; works when the access token is
+expired or absent. Idempotent: a missing, expired, or not-active cookie still
+returns `204` and clears the cookie.
 
 Response `204`.
 
-Errors: `401`.
+Errors: none (idempotent); DB failures return `500` `internal_server_error`.
 
 ### POST /v1/auth/logout-all
-Revokes every session for the authenticated user and clears the `refresh_token`
-cookie.
+Revokes every active session for the user identified by the `refresh_token`
+cookie and clears the cookie. The user is resolved from the cookie's session.
+Idempotent: possession of the refresh cookie is sufficient to revoke all
+sessions — by design, consistent with industry practice.
 
 Response `204`.
 
-Errors: `401`.
+Errors: none (idempotent); DB failures return `500` `internal_server_error`.
 
 ---
 

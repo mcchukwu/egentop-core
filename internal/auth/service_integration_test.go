@@ -262,7 +262,7 @@ func TestLogoutRevokesSession(t *testing.T) {
 
 	email := "logout-" + uuid.NewString() + "@example.com"
 
-	register(t, svc, email)
+	_, refreshToken := register(t, svc, email)
 
 	var userID uuid.UUID
 	err := db.QueryRowContext(ctx, `SELECT id FROM users WHERE email = $1`, email).Scan(&userID)
@@ -278,7 +278,7 @@ func TestLogoutRevokesSession(t *testing.T) {
 		t.Fatalf("find session: %v", err)
 	}
 
-	if err := svc.Logout(ctx, sessionID); err != nil {
+	if err := svc.Logout(ctx, refreshToken); err != nil {
 		t.Fatalf("logout: %v", err)
 	}
 
@@ -301,7 +301,7 @@ func TestLogoutAllDevicesRevokesAllSessions(t *testing.T) {
 
 	email := "logoutall-" + uuid.NewString() + "@example.com"
 
-	register(t, svc, email)
+	_, refreshToken := register(t, svc, email)
 
 	// create a second session via login
 	_, _, err := svc.Login(ctx, LoginRequest{Identifier: email, Password: "password123"})
@@ -326,7 +326,7 @@ func TestLogoutAllDevicesRevokesAllSessions(t *testing.T) {
 		t.Fatalf("expected 2 active sessions, got %d", activeBefore)
 	}
 
-	if err := svc.LogoutAllDevices(ctx, userID); err != nil {
+	if err := svc.LogoutAllDevices(ctx, refreshToken); err != nil {
 		t.Fatalf("logout all: %v", err)
 	}
 
@@ -364,20 +364,12 @@ func TestAuthAuditRowsWrittenWithoutOrg(t *testing.T) {
 		t.Fatalf("find user: %v", err)
 	}
 
-	_, _, err = svc.RefreshToken(ctx, refreshToken)
+	_, newRefresh, err := svc.RefreshToken(ctx, refreshToken)
 	if err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
 
-	var sessionID uuid.UUID
-	err = db.QueryRowContext(ctx, `
-		SELECT id FROM sessions WHERE user_id = $1 AND revoked = false
-	`, userID).Scan(&sessionID)
-	if err != nil {
-		t.Fatalf("find session: %v", err)
-	}
-
-	if err := svc.Logout(ctx, sessionID); err != nil {
+	if err := svc.Logout(ctx, newRefresh); err != nil {
 		t.Fatalf("logout: %v", err)
 	}
 

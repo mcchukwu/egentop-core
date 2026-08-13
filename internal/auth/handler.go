@@ -6,7 +6,6 @@ import (
 
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/normalize"
-	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
 	"github.com/mcchukwu/egentop/internal/validation"
 	"github.com/mcchukwu/egentop/pkg/config"
@@ -152,20 +151,47 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 // Logout invalidates the session
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	// Get session id
-	sessionID, ok := requestctx.SessionID(r.Context())
-	if !ok {
-		response.HandleError(w, apperrors.ErrExpiredToken)
+	// Cookie-only auth: any error (missing or malformed cookie) is treated as
+	// already logged out — 204 and clear, never 401.
+	cookie, err := r.Cookie("refresh_token")
+	if err != nil {
+		h.clearRefreshCookie(w)
+		response.Success(w, http.StatusNoContent, "logout successful", nil)
 		return
 	}
 
-	// Call logout service
-	if err := h.Service.Logout(r.Context(), sessionID); err != nil {
-		response.HandleError(w, err)
+	if err := h.Service.Logout(r.Context(), cookie.Value); err != nil {
+		response.HandleError(w, err) // only genuine DB/audit failures (500)
 		return
 	}
 
-	// Delete refresh token cookie
+	h.clearRefreshCookie(w)
+	response.Success(w, http.StatusNoContent, "logout successful", nil)
+}
+
+// LogoutAllDevices revokes all sessions for a user
+func (h *Handler) LogoutAllDevices(w http.ResponseWriter, r *http.Request) {
+	// Cookie-only auth: any error (missing or malformed cookie) is treated as
+	// already logged out — 204 and clear, never 401.
+	cookie, err := r.Cookie("refresh_token")
+	if err != nil {
+		h.clearRefreshCookie(w)
+		response.Success(w, http.StatusNoContent, "logout successful", nil)
+		return
+	}
+
+	if err := h.Service.LogoutAllDevices(r.Context(), cookie.Value); err != nil {
+		response.HandleError(w, err) // only genuine DB/audit failures (500)
+		return
+	}
+
+	h.clearRefreshCookie(w)
+	response.Success(w, http.StatusNoContent, "logout successful", nil)
+}
+
+// clearRefreshCookie deletes the refresh_token cookie (attributes preserved
+// verbatim from the previous implementation).
+func (h *Handler) clearRefreshCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    "",
@@ -174,36 +200,4 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		Secure:   h.Config.AppEnv == "production", // true in production HTTPS
 		MaxAge:   -1,
 	})
-
-	// Return response
-	response.Success(w, http.StatusNoContent, "logout successful", nil)
-}
-
-// LogoutAllDevices revokes all sessions for a user
-func (h *Handler) LogoutAllDevices(w http.ResponseWriter, r *http.Request) {
-	// Find user
-	userID, ok := requestctx.UserID(r.Context())
-	if !ok {
-		response.HandleError(w, apperrors.ErrUserNotFound)
-		return
-	}
-
-	// Call logoutalldevices service
-	if err := h.Service.LogoutAllDevices(r.Context(), userID); err != nil {
-		response.HandleError(w, err)
-		return
-	}
-
-	// Revoke refresh token
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   h.Config.AppEnv == "production",
-		MaxAge:   -1,
-	})
-
-	// Return response
-	response.Success(w, http.StatusNoContent, "logout successful", nil)
 }

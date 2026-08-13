@@ -34,15 +34,22 @@ type refreshEnvelope struct {
 	} `json:"error"`
 }
 
+// newTestAuthCore builds the shared service/handler stack for the auth route
+// harnesses (mirrors the production wiring in cmd/api/main.go).
+func newTestAuthCore(t *testing.T, db *sql.DB) *Handler {
+	t.Helper()
+	cfg := &config.Config{AppEnv: "development", JWTRefreshTokenTTL: 30 * 24 * time.Hour}
+	manager := jwt.NewManager("test-secret-0123456789abcdef0123456789abcdef", 15*time.Minute)
+	svc := NewService(db, audit.NewService(db), manager, cfg)
+	return NewHandler(svc, cfg)
+}
+
 // newTestRefreshHandler builds the production chain for the refresh route:
 // refresh rate limiter (10/min) wrapping the auth refresh handler.
 func newTestRefreshHandler(t *testing.T, db *sql.DB) http.Handler {
 	t.Helper()
 
-	cfg := &config.Config{AppEnv: "development", JWTRefreshTokenTTL: 30 * 24 * time.Hour}
-	manager := jwt.NewManager("test-secret-0123456789abcdef0123456789abcdef", 15*time.Minute)
-	svc := NewService(db, audit.NewService(db), manager, cfg)
-	h := NewHandler(svc, cfg)
+	h := newTestAuthCore(t, db)
 	limiter := middleware.NewRateLimiterMiddleware(10, time.Minute)
 
 	return limiter.Limit(http.HandlerFunc(h.RefreshToken))

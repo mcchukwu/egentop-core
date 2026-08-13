@@ -349,83 +349,85 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (string
 	return newAccessToken, newRefreshToken, err
 }
 
-// Logout revokes sessions for a user's device
-func (s *Service) Logout(ctx context.Context, sessionID uuid.UUID) error {
+// Logout revokes the session identified by the presented refresh token.
+// Idempotent: an unknown, revoked, or expired token is a no-op (the user is
+// already logged out) and returns nil. No family revocation is triggered —
+// logout grants nothing, so replaying a revoked cookie is harmless.
+func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	err := db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
-		var userID uuid.UUID
+	return db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
+		sessionID, userID, revoked, expiresAt, found, err := resolveSessionForLogout(dbCtx, tx, refreshToken)
+		if err != nil {
+			return err
+		}
+		if !found || revoked || !expiresAt.After(time.Now()) {
+			return nil // already logged out
+		}
 
-		// Revoke session
-		err := tx.QueryRowContext(dbCtx, `
+		// Guard with revoked=false so a concurrent replay cannot double-revoke
+		// or double-audit. ErrNoRows here means the race was lost: no-op.
+		err = tx.QueryRowContext(dbCtx, `
 			UPDATE sessions
 			SET revoked = true,
 				revoked_at = NOW()
 			WHERE id = $1
+			  AND revoked = false
 			RETURNING user_id
 		`, sessionID).Scan(&userID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return apperrors.ErrSessionRevoked
+				return nil
 			}
-
 			return apperrors.ErrDatabase
 		}
 
-		// Audit Log
-		err = s.audit.Log(dbCtx, tx, audit.LogEntry{
+		return s.audit.Log(dbCtx, tx, audit.LogEntry{
 			UserID:     &userID,
 			Action:     "user.logged_out",
 			EntityType: "user",
 			EntityID:   &userID,
 			Metadata:   map[string]any{},
 		})
-		if err != nil {
-			return err
-		}
-
-		return nil
 	})
-
-	return err
 }
 
-// LogoutAllDevices revokes all sessions for a user
-func (s *Service) LogoutAllDevices(ctx context.Context, userID uuid.UUID) error {
+// LogoutAllDevices revokes every active session of the user identified by
+// the presented refresh token. Idempotent when the token is unknown or the
+// session is already revoked or expired: returns nil.
+func (s *Service) LogoutAllDevices(ctx context.Context, refreshToken string) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	err := db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(dbCtx, `
-		UPDATE sessions
-		SET revoked = true,
-		    revoked_at = NOW()
-		WHERE user_id = $1
-		AND revoked = false
-		`,
-			userID,
-		)
+	return db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
+		_, userID, revoked, expiresAt, found, err := resolveSessionForLogout(dbCtx, tx, refreshToken)
+		if err != nil {
+			return err
+		}
+		if !found || revoked || !expiresAt.After(time.Now()) {
+			return nil // cannot resolve an active session; idempotent no-op
+		}
+
+		_, err = tx.ExecContext(dbCtx, `
+			UPDATE sessions
+			SET revoked = true,
+				revoked_at = NOW()
+			WHERE user_id = $1
+			  AND revoked = false
+		`, userID)
 		if err != nil {
 			return apperrors.ErrDatabase
 		}
 
-		// Audit Log
-		err = s.audit.Log(dbCtx, tx, audit.LogEntry{
+		return s.audit.Log(dbCtx, tx, audit.LogEntry{
 			UserID:     &userID,
 			Action:     "user.logged_out_all_devices",
 			EntityType: "user",
 			EntityID:   &userID,
 			Metadata:   map[string]any{},
 		})
-		if err != nil {
-			return err
-		}
-
-		return nil
 	})
-
-	return err
 }
 
 // -----------------------------------------------------------------------------
@@ -450,6 +452,29 @@ func hashRefreshToken(rt string) (string, error) {
 func lookupHashRefreshToken(rt string) string {
 	sum := sha256.Sum256([]byte(rt))
 	return hex.EncodeToString(sum[:])
+}
+
+// resolveSessionForLogout locates the session row by the deterministic
+// token fingerprint and verifies the presented token against the stored
+// bcrypt hash. found=false means the token matches no verifiable session;
+// callers treat that as an idempotent no-op (already logged out).
+func resolveSessionForLogout(ctx context.Context, tx *sql.Tx, refreshToken string) (sessionID, userID uuid.UUID, revoked bool, expiresAt time.Time, found bool, err error) {
+	var hashedToken string
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, user_id, refresh_token_hash, revoked, expires_at
+		FROM sessions
+		WHERE token_lookup_hash = $1
+	`, lookupHashRefreshToken(refreshToken)).Scan(&sessionID, &userID, &hashedToken, &revoked, &expiresAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return uuid.Nil, uuid.Nil, false, time.Time{}, false, nil
+		}
+		return uuid.Nil, uuid.Nil, false, time.Time{}, false, apperrors.ErrDatabase
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hashedToken), []byte(refreshToken)) != nil {
+		return uuid.Nil, uuid.Nil, false, time.Time{}, false, nil
+	}
+	return sessionID, userID, revoked, expiresAt, true, nil
 }
 
 // nullableString returns a pointer to the string if it's not empty

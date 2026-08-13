@@ -100,8 +100,8 @@ func main() {
 	mux.Handle("POST /v1/me/password", authMiddleware.RequireAuth(passwordChangeLimiterMiddleware.Limit(http.HandlerFunc(userHandler.ChangePassword))))
 
 	mux.Handle("POST /v1/auth/refresh", refreshLimiterMiddleware.Limit(http.HandlerFunc(authHandler.RefreshToken)))
-	mux.Handle("POST /v1/auth/logout", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.Logout)))
-	mux.Handle("POST /v1/auth/logout-all", authMiddleware.RequireAuth(http.HandlerFunc(authHandler.LogoutAllDevices)))
+	mux.Handle("POST /v1/auth/logout", http.HandlerFunc(authHandler.Logout))
+	mux.Handle("POST /v1/auth/logout-all", http.HandlerFunc(authHandler.LogoutAllDevices))
 
 	mux.Handle("POST /v1/orgs", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.Create)))
 	mux.Handle("GET /v1/orgs", authMiddleware.RequireAuth(http.HandlerFunc(orgHandler.List)))
