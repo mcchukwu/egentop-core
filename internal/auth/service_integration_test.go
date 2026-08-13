@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/audit"
 	"github.com/mcchukwu/egentop/internal/jwt"
 	"github.com/mcchukwu/egentop/pkg/config"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func integrationDB(t *testing.T) *sql.DB {
@@ -160,7 +160,7 @@ func TestRefreshRotationAndReuseDetection(t *testing.T) {
 	}
 
 	// rotate
-	newAccess, newRefresh, err := svc.RefreshToken(ctx, userID, refreshToken)
+	newAccess, newRefresh, err := svc.RefreshToken(ctx, refreshToken)
 	if err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestRefreshRotationAndReuseDetection(t *testing.T) {
 	}
 
 	// reusing the now-revoked token revokes the whole family
-	_, _, err = svc.RefreshToken(ctx, userID, refreshToken)
+	_, _, err = svc.RefreshToken(ctx, refreshToken)
 	if !errors.Is(err, apperrors.ErrSessionRevoked) {
 		t.Fatalf("expected ErrSessionRevoked on reuse, got %v", err)
 	}
@@ -214,9 +214,42 @@ func TestRefreshRotationAndReuseDetection(t *testing.T) {
 	}
 
 	// a fresh refresh token from the rotation is also now dead (family revoked)
-	_, _, err = svc.RefreshToken(ctx, userID, newRefresh)
+	_, _, err = svc.RefreshToken(ctx, newRefresh)
 	if !errors.Is(err, apperrors.ErrSessionRevoked) {
 		t.Fatalf("expected ErrSessionRevoked for rotated token after family revocation, got %v", err)
+	}
+}
+
+func TestRefreshTokenExpiredFails(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	email := "refresh-expired-" + uuid.NewString() + "@example.com"
+
+	_, refreshToken := register(t, svc, email)
+
+	var userID uuid.UUID
+	err := db.QueryRowContext(ctx, `SELECT id FROM users WHERE email = $1`, email).Scan(&userID)
+	if err != nil {
+		t.Fatalf("find user: %v", err)
+	}
+
+	// backdate the session so the refresh token is expired
+	_, err = db.ExecContext(ctx, `
+		UPDATE sessions
+		SET expires_at = NOW() - INTERVAL '1 minute'
+		WHERE user_id = $1 AND revoked = false
+	`, userID)
+	if err != nil {
+		t.Fatalf("backdate session: %v", err)
+	}
+
+	_, _, err = svc.RefreshToken(ctx, refreshToken)
+	if !errors.Is(err, apperrors.ErrInvalidToken) {
+		t.Fatalf("expected ErrInvalidToken for expired refresh token, got %v", err)
 	}
 }
 
@@ -331,7 +364,7 @@ func TestAuthAuditRowsWrittenWithoutOrg(t *testing.T) {
 		t.Fatalf("find user: %v", err)
 	}
 
-	_, _, err = svc.RefreshToken(ctx, userID, refreshToken)
+	_, _, err = svc.RefreshToken(ctx, refreshToken)
 	if err != nil {
 		t.Fatalf("refresh: %v", err)
 	}

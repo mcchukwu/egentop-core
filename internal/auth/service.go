@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
@@ -209,7 +210,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (string, string, 
 
 // RefreshToken rotates a refresh token within its session lineage. Reusing a
 // revoked token is treated as a theft signal and revokes the whole family.
-func (s *Service) RefreshToken(ctx context.Context, userID uuid.UUID, refreshToken string) (string, string, error) {
+func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (string, string, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -225,61 +226,46 @@ func (s *Service) RefreshToken(ctx context.Context, userID uuid.UUID, refreshTok
 	var reuseDetected bool
 
 	err = db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(dbCtx, `
-			SELECT id, token_family_id, refresh_token_hash, revoked
-			FROM sessions
-			WHERE user_id = $1
-		`, userID)
-		if err != nil {
-			return apperrors.ErrDatabase
-		}
-
 		var (
-			sessionID       uuid.UUID
-			familyID        uuid.UUID
-			hashedToken     string
-			revoked         bool
-			foundSessionID  uuid.UUID
-			foundFamilyID   uuid.UUID
-			foundRevoked    bool
-			hasMatch        bool
+			sessionID   uuid.UUID
+			userID      uuid.UUID
+			familyID    uuid.UUID
+			hashedToken string
+			revoked     bool
+			expiresAt   time.Time
 		)
 
-		for rows.Next() {
-			err = rows.Scan(&sessionID, &familyID, &hashedToken, &revoked)
-			if err != nil {
-				return apperrors.ErrInternalServer
+		// The deterministic fingerprint locates the candidate session by raw
+		// token value; the bcrypt hash below remains the authoritative check.
+		err = tx.QueryRowContext(dbCtx, `
+			SELECT id, user_id, token_family_id, refresh_token_hash, revoked, expires_at
+			FROM sessions
+			WHERE token_lookup_hash = $1
+		`, lookupHashRefreshToken(refreshToken)).Scan(&sessionID, &userID, &familyID, &hashedToken, &revoked, &expiresAt)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return apperrors.ErrInvalidToken
 			}
 
-			err = bcrypt.CompareHashAndPassword([]byte(hashedToken), []byte(refreshToken))
-			if err == nil {
-				foundSessionID = sessionID
-				foundFamilyID = familyID
-				foundRevoked = revoked
-				hasMatch = true
-				break
-			}
-		}
-		if rows.Err() != nil {
-			rows.Close()
 			return apperrors.ErrDatabase
 		}
 
-		rows.Close()
-
-		if !hasMatch {
+		// Defense in depth: the fingerprint only narrows the lookup; the
+		// bcrypt hash must still match the presented token.
+		err = bcrypt.CompareHashAndPassword([]byte(hashedToken), []byte(refreshToken))
+		if err != nil {
 			return apperrors.ErrInvalidToken
 		}
 
 		// Reuse of a revoked token: the token was stolen, revoke the whole family
-		if foundRevoked {
+		if revoked {
 			_, err = tx.ExecContext(dbCtx, `
 				UPDATE sessions
 				SET revoked = true,
 					revoked_at = NOW()
 				WHERE token_family_id = $1
 				AND revoked = false
-			`, foundFamilyID)
+			`, familyID)
 			if err != nil {
 				return apperrors.ErrDatabase
 			}
@@ -297,13 +283,18 @@ func (s *Service) RefreshToken(ctx context.Context, userID uuid.UUID, refreshTok
 			return nil
 		}
 
+		// Expired refresh tokens are rejected outright.
+		if !expiresAt.After(time.Now()) {
+			return apperrors.ErrInvalidToken
+		}
+
 		// Revoke the old session
 		_, err = tx.ExecContext(dbCtx, `
 			UPDATE sessions
 			SET revoked = true,
 				revoked_at = NOW()
 			WHERE id = $1
-		`, foundSessionID)
+		`, sessionID)
 		if err != nil {
 			return apperrors.ErrDatabase
 		}
@@ -327,10 +318,10 @@ func (s *Service) RefreshToken(ctx context.Context, userID uuid.UUID, refreshTok
 		var newSessionID uuid.UUID
 
 		err = tx.QueryRowContext(dbCtx, `
-			INSERT INTO sessions (user_id, token_family_id, refresh_token_hash, expires_at)
-			VALUES ($1, $2, $3, $4)
+			INSERT INTO sessions (user_id, token_family_id, refresh_token_hash, token_lookup_hash, expires_at)
+			VALUES ($1, $2, $3, $4, $5)
 			RETURNING id
-		`, userID, foundFamilyID, newRefreshTokenHash, time.Now().Add(s.cfg.JWTRefreshTokenTTL)).Scan(&newSessionID)
+		`, userID, familyID, newRefreshTokenHash, lookupHashRefreshToken(newRefreshToken), time.Now().Add(s.cfg.JWTRefreshTokenTTL)).Scan(&newSessionID)
 		if err != nil {
 			return apperrors.ErrDatabase
 		}
@@ -453,6 +444,14 @@ func hashRefreshToken(rt string) (string, error) {
 	return string(bytes), err
 }
 
+// lookupHashRefreshToken returns a fast, deterministic fingerprint of the
+// raw refresh token used for DB lookups. The authoritative stored secret
+// remains the bcrypt refresh_token_hash.
+func lookupHashRefreshToken(rt string) string {
+	sum := sha256.Sum256([]byte(rt))
+	return hex.EncodeToString(sum[:])
+}
+
 // nullableString returns a pointer to the string if it's not empty
 func nullableString(s string) *string {
 	if s == "" {
@@ -479,10 +478,10 @@ func createSession(ctx context.Context, tx *sql.Tx, userID uuid.UUID, jwt *jwt.M
 	var sessionID uuid.UUID
 
 	err = tx.QueryRowContext(ctx, `
-        INSERT INTO sessions (user_id, refresh_token_hash, expires_at, revoked, created_at)
-        VALUES ($1, $2, $3, false, NOW())
+        INSERT INTO sessions (user_id, refresh_token_hash, token_lookup_hash, expires_at, revoked, created_at)
+        VALUES ($1, $2, $3, $4, false, NOW())
         RETURNING id
-    `, userID, string(hashedRefreshToken), time.Now().Add(cfg.JWTRefreshTokenTTL)).Scan(&sessionID)
+    `, userID, string(hashedRefreshToken), lookupHashRefreshToken(refreshToken), time.Now().Add(cfg.JWTRefreshTokenTTL)).Scan(&sessionID)
 	if err != nil {
 		return "", "", apperrors.ErrDatabase
 	}

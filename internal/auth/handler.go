@@ -127,13 +127,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, ok := requestctx.UserID(r.Context())
-	if !ok {
-		response.HandleError(w, apperrors.ErrUnauthorized)
-		return
-	}
-
-	accessToken, newRefreshToken, err := h.Service.RefreshToken(r.Context(), userID, cookie.Value)
+	accessToken, newRefreshToken, err := h.Service.RefreshToken(r.Context(), cookie.Value)
 	if err != nil {
 		response.HandleError(w, err)
 		return

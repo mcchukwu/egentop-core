@@ -153,7 +153,8 @@ Errors: `400` `validation_error`, `401` `invalid_credentials`, `403` `forbidden`
 
 ### POST /v1/auth/refresh
 Rotates the refresh token from the `refresh_token` cookie and returns a new
-access token. Requires a valid access token in the `Authorization` header.
+access token. Authenticated solely by the `refresh_token` cookie; works even
+when the access token is expired or absent.
 
 Response `200`:
 
@@ -165,7 +166,7 @@ Response `200`:
 }
 ```
 
-Errors: `401` `invalid_token` / `unauthorized` / `session_expired` / `session_revoked`.
+Errors: `401` `invalid_token` / `session_revoked`.
 
 ### POST /v1/auth/logout
 Revokes the current session and clears the `refresh_token` cookie.
