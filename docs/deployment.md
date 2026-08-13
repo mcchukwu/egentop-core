@@ -58,6 +58,26 @@ The app opens a `database/sql` connection pool against `DB_URL`. Tune the pool
 via the standard `SetMaxOpenConns`/`SetMaxIdleConns` knobs in `pkg/db` if the
 defaults are not suitable for your traffic.
 
+### Database Maintenance
+
+**Retention: `authz_decisions`**
+
+Authorization decisions are append-only audit rows that grow by one per
+request. Prune them on a schedule (e.g. weekly) with:
+
+    DELETE FROM authz_decisions
+    WHERE created_at < NOW() - INTERVAL '90 days';
+
+90 days is the recommended default: it bounds table size and keeps
+`idx_authz_decisions_org_created` scans fast while still covering a
+~quarter-year investigation window. `permission_key` and `reason` are
+denormalized snapshots and nothing references `authz_decisions`, so pruning
+is safe. Extend the interval (180/365 days) if compliance or post-incident
+forensics need a longer window; shorten it if storage is a concern.
+
+Run it via `make authz-decisions-cleanup` (uses the `.env` DSN) or the SQL
+above during a low-traffic maintenance window.
+
 ## Running
 
 ### Option A: Systemd
@@ -139,8 +159,11 @@ readinessProbe:
 
 ## Operational Notes
 
-- **Rate limiting is in-memory** (per instance). Under horizontal scaling,
-  enforce limits at the load balancer or WAF for consistency.
+- **Rate limiting is in-memory** (per instance). This is fine for a
+  single-instance deploy; before scaling to multiple instances, move the
+  limiter to a shared store (e.g. Redis) so limits apply across all
+  instances. Until then, enforce limits at the load balancer or WAF for
+  consistent coverage.
 - **Sessions are server-side** in PostgreSQL; a fresh instance can validate
   existing refresh tokens immediately.
 - The app shuts down gracefully on `SIGINT`/`SIGTERM` (10s timeout) and closes

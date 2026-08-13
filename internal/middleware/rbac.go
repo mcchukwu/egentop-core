@@ -40,17 +40,25 @@ func (m *RBACMiddleware) RequirePermission(permissionKey string) func(http.Handl
 				return
 			}
 
-			var role string
+			var (
+				role    string
+				allowed bool
+			)
 
 			err := m.DB.QueryRowContext(r.Context(), `
-				SELECT r.name
+				SELECT r.name, EXISTS(
+					SELECT 1
+					FROM role_permissions rp
+					JOIN permissions p ON p.id = rp.permission_id
+					WHERE rp.role_id = r.id AND p.key = $3
+				)
 				FROM memberships m
 				JOIN roles r ON r.id = m.role_id
 				WHERE m.user_id = $1
 				AND m.organization_id = $2
 				AND m.status = 'active'
 				LIMIT 1
-			`, userID, organizationID).Scan(&role)
+			`, userID, organizationID, permissionKey).Scan(&role, &allowed)
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					_ = recordAuthzDecision(r.Context(), m.DB, organizationID, userID, permissionKey, "", uuid.Nil, false, "not a member")
@@ -58,26 +66,6 @@ func (m *RBACMiddleware) RequirePermission(permissionKey string) func(http.Handl
 					return
 				}
 
-				response.HandleError(w, apperrors.ErrDatabase)
-				return
-			}
-
-			var allowed bool
-
-			err = m.DB.QueryRowContext(r.Context(), `
-				SELECT EXISTS (
-					SELECT 1
-					FROM memberships m
-					JOIN roles r          ON r.id = m.role_id
-					JOIN role_permissions rp ON rp.role_id = r.id
-					JOIN permissions p    ON p.id = rp.permission_id
-					WHERE m.user_id = $1
-					AND m.organization_id = $2
-					AND m.status = 'active'
-					AND p.key = $3
-				)
-			`, userID, organizationID, permissionKey).Scan(&allowed)
-			if err != nil {
 				response.HandleError(w, apperrors.ErrDatabase)
 				return
 			}

@@ -219,6 +219,7 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (string
 			SELECT id, user_id, token_family_id, refresh_token_hash, revoked, expires_at
 			FROM sessions
 			WHERE token_lookup_hash = $1
+			FOR UPDATE
 		`, lookupHashRefreshToken(refreshToken)).Scan(&sessionID, &userID, &familyID, &hashedToken, &revoked, &expiresAt)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -442,6 +443,7 @@ func resolveSessionForLogout(ctx context.Context, tx *sql.Tx, refreshToken strin
 		SELECT id, user_id, refresh_token_hash, revoked, expires_at
 		FROM sessions
 		WHERE token_lookup_hash = $1
+		FOR UPDATE
 	`, lookupHashRefreshToken(refreshToken)).Scan(&sessionID, &userID, &hashedToken, &revoked, &expiresAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
