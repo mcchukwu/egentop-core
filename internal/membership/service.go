@@ -17,6 +17,39 @@ type Service struct {
 	AuditService *audit.Service
 }
 
+// requireOwnerToGrantOwner prevents non-owners from granting the owner role.
+// The actor's membership is checked in the same transaction as the change so
+// this authorization cannot be bypassed by calling the service directly.
+func requireOwnerToGrantOwner(ctx context.Context, tx *sql.Tx, orgID, actorID uuid.UUID, role Role) error {
+	if role != RoleOwner {
+		return nil
+	}
+
+	var actorRole Role
+	err := tx.QueryRowContext(ctx, `
+		SELECT r.name
+		FROM memberships m
+		JOIN roles r ON r.id = m.role_id
+		WHERE m.organization_id = $1
+		AND m.user_id = $2
+		AND m.status = 'active'
+		FOR UPDATE OF m
+	`, orgID, actorID).Scan(&actorRole)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return apperrors.ErrForbidden
+		}
+
+		return apperrors.ErrDatabase
+	}
+
+	if actorRole != RoleOwner {
+		return apperrors.ErrForbidden
+	}
+
+	return nil
+}
+
 func NewService(db *sql.DB, auditService *audit.Service) *Service {
 	return &Service{
 		DB:           db,
@@ -31,6 +64,10 @@ func (s *Service) InviteOrgMember(ctx context.Context, orgID uuid.UUID, actorID 
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		if err := requireOwnerToGrantOwner(dbCtx, tx, orgID, actorID, role); err != nil {
+			return err
+		}
+
 		// Resolve the invited user by email
 		var invitedUserID uuid.UUID
 
@@ -112,6 +149,10 @@ func (s *Service) AddOrgMember(ctx context.Context, orgID uuid.UUID, actorID uui
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		if err := requireOwnerToGrantOwner(dbCtx, tx, orgID, actorID, newMemberRole); err != nil {
+			return err
+		}
+
 		roleID, err := ResolveSystemRoleID(dbCtx, tx, newMemberRole)
 		if err != nil {
 			return err
@@ -295,6 +336,10 @@ func (s *Service) UpdateOrgMemberRole(ctx context.Context, orgID uuid.UUID, acto
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		if err := requireOwnerToGrantOwner(dbCtx, tx, orgID, actorID, newRole); err != nil {
+			return err
+		}
+
 		roleID, err := ResolveSystemRoleID(dbCtx, tx, newRole)
 		if err != nil {
 			return err

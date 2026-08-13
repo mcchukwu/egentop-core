@@ -44,7 +44,7 @@ func (r *Repository) Create(ctx context.Context, tx *sql.Tx, assignment *Assignm
 }
 
 // GetByID returns an assignment by ID scoped to an organization
-func (r *Repository) GetByIDAndOrganizationID(ctx context.Context, tx *sql.Tx, orgID uuid.UUID, assignmentID uuid.UUID, assignment *Assignment) error {
+func (r *Repository) GetByIDAndProjectIDAndOrganizationID(ctx context.Context, tx *sql.Tx, orgID uuid.UUID, projectID uuid.UUID, assignmentID uuid.UUID, assignment *Assignment) error {
 	query := `
 		SELECT
 			id,
@@ -57,9 +57,10 @@ func (r *Repository) GetByIDAndOrganizationID(ctx context.Context, tx *sql.Tx, o
 		FROM assignments
 		WHERE id = $1
 		AND organization_id = $2
+		AND project_id = $3
 	`
 
-	err := tx.QueryRowContext(ctx, query, assignmentID, orgID).Scan(&assignment.ID, &assignment.OrganizationID, &assignment.ProjectID, &assignment.MilestoneID, &assignment.AssignedTo, &assignment.AssignedBy, &assignment.CreatedAt)
+	err := tx.QueryRowContext(ctx, query, assignmentID, orgID, projectID).Scan(&assignment.ID, &assignment.OrganizationID, &assignment.ProjectID, &assignment.MilestoneID, &assignment.AssignedTo, &assignment.AssignedBy, &assignment.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return apperrors.ErrAssignmentNotFound
@@ -128,13 +129,14 @@ func (r *Repository) ListByProjectID(ctx context.Context, orgID uuid.UUID, proje
 }
 
 // UpdateAssignedTo reassigns an assignment to a new user, scoped to an organization.
-func (r *Repository) UpdateAssignedTo(ctx context.Context, tx *sql.Tx, orgID uuid.UUID, assignmentID uuid.UUID, assignedTo uuid.UUID) error {
+func (r *Repository) UpdateAssignedTo(ctx context.Context, tx *sql.Tx, orgID uuid.UUID, projectID uuid.UUID, assignmentID uuid.UUID, assignedTo uuid.UUID) error {
 	result, err := tx.ExecContext(ctx, `
 		UPDATE assignments
 		SET assigned_to = $1
 		WHERE id = $2
 		AND organization_id = $3
-	`, assignedTo, assignmentID, orgID)
+		AND project_id = $4
+	`, assignedTo, assignmentID, orgID, projectID)
 	if err != nil {
 		return err
 	}
@@ -152,12 +154,13 @@ func (r *Repository) UpdateAssignedTo(ctx context.Context, tx *sql.Tx, orgID uui
 }
 
 // Delete removes an assignment, scoped to an organization.
-func (r *Repository) Delete(ctx context.Context, tx *sql.Tx, orgID uuid.UUID, assignmentID uuid.UUID) error {
+func (r *Repository) Delete(ctx context.Context, tx *sql.Tx, orgID uuid.UUID, projectID uuid.UUID, assignmentID uuid.UUID) error {
 	result, err := tx.ExecContext(ctx, `
 		DELETE FROM assignments
 		WHERE id = $1
 		AND organization_id = $2
-	`, assignmentID, orgID)
+		AND project_id = $3
+	`, assignmentID, orgID, projectID)
 	if err != nil {
 		return err
 	}
@@ -169,6 +172,66 @@ func (r *Repository) Delete(ctx context.Context, tx *sql.Tx, orgID uuid.UUID, as
 
 	if rows == 0 {
 		return apperrors.ErrAssignmentNotFound
+	}
+
+	return nil
+}
+
+// EnsureProjectInOrganization verifies the URL project belongs to the active
+// organization before an assignment is created.
+func (r *Repository) EnsureProjectInOrganization(ctx context.Context, tx *sql.Tx, orgID, projectID uuid.UUID) error {
+	var exists bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM projects
+			WHERE id = $1 AND organization_id = $2
+		)
+	`, projectID, orgID).Scan(&exists)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return apperrors.ErrProjectNotFound
+	}
+	return nil
+}
+
+// EnsureMilestoneInProject verifies that the assignment target milestone is
+// owned by both the requested project and organization.
+func (r *Repository) EnsureMilestoneInProject(ctx context.Context, tx *sql.Tx, orgID, projectID, milestoneID uuid.UUID) error {
+	var exists bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM milestones
+			WHERE id = $1 AND project_id = $2 AND organization_id = $3
+		)
+	`, milestoneID, projectID, orgID).Scan(&exists)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return apperrors.ErrMilestoneNotFound
+	}
+	return nil
+}
+
+// EnsureActiveMember verifies that the assignee has an active membership in
+// the organization. The row is locked for the duration of the create
+// transaction so a concurrent membership change cannot pass this check after
+// the assignment is inserted.
+func (r *Repository) EnsureActiveMember(ctx context.Context, tx *sql.Tx, orgID, userID uuid.UUID) error {
+	var found uuid.UUID
+	err := tx.QueryRowContext(ctx, `
+		SELECT id
+		FROM memberships
+		WHERE organization_id = $1 AND user_id = $2 AND status = 'active'
+		FOR UPDATE
+	`, orgID, userID).Scan(&found)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return apperrors.ErrMembershipNotFound
+		}
+		return err
 	}
 
 	return nil

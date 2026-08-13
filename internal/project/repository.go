@@ -216,19 +216,21 @@ func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, 
 
 // UpdateMilestoneDetails updates a milestone's metadata (title, description,
 // due date and/or position). Nil fields are left unchanged.
-func (r *Repository) UpdateMilestoneDetails(ctx context.Context, tx *sql.Tx, milestoneID uuid.UUID, title *string, description *string, dueDate *time.Time, position *int) error {
+func (r *Repository) UpdateMilestoneDetails(ctx context.Context, tx *sql.Tx, milestoneID uuid.UUID, projectID uuid.UUID, organizationID uuid.UUID, title *string, description *string, dueDate *time.Time, position *int) error {
 	query := `
 	UPDATE milestones
 	SET
-		title = COALESCE($2, title),
-		description = COALESCE($3, description),
-		due_date = COALESCE($4, due_date),
-		position = COALESCE($5, position),
+		title = COALESCE($4, title),
+		description = COALESCE($5, description),
+		due_date = COALESCE($6, due_date),
+		position = COALESCE($7, position),
 		updated_at = NOW()
 	WHERE id = $1
+	AND project_id = $2
+	AND organization_id = $3
 	`
 
-	result, err := tx.ExecContext(ctx, query, milestoneID, title, description, dueDate, position)
+	result, err := tx.ExecContext(ctx, query, milestoneID, projectID, organizationID, title, description, dueDate, position)
 	if err != nil {
 		return err
 	}
@@ -280,7 +282,7 @@ func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projec
 }
 
 // GetMilestoneByIDAndOrganization gets a milestone by ID and organization ID
-func (r *Repository) GetMilestoneByIDAndOrganizationID(ctx context.Context, milestoneID uuid.UUID, organizationID uuid.UUID) (*Milestone, error) {
+func (r *Repository) GetMilestoneByIDAndProjectIDAndOrganizationID(ctx context.Context, milestoneID uuid.UUID, projectID uuid.UUID, organizationID uuid.UUID) (*Milestone, error) {
 	query := `
 		SELECT
 			id,
@@ -297,12 +299,13 @@ func (r *Repository) GetMilestoneByIDAndOrganizationID(ctx context.Context, mile
 			updated_at
 		FROM milestones
 		WHERE id = $1
-		AND organization_id = $2
+		AND project_id = $2
+		AND organization_id = $3
 	`
 
 	milestone := &Milestone{}
 
-	err := r.DB.QueryRowContext(ctx, query, milestoneID, organizationID).Scan(&milestone.ID, &milestone.ProjectID, &milestone.OrganizationID, &milestone.Title, &milestone.Description, &milestone.Status, &milestone.DueDate, &milestone.Position, &milestone.CompletedAt, &milestone.CreatedBy, &milestone.CreatedAt, &milestone.UpdatedAt)
+	err := r.DB.QueryRowContext(ctx, query, milestoneID, projectID, organizationID).Scan(&milestone.ID, &milestone.ProjectID, &milestone.OrganizationID, &milestone.Title, &milestone.Description, &milestone.Status, &milestone.DueDate, &milestone.Position, &milestone.CompletedAt, &milestone.CreatedBy, &milestone.CreatedAt, &milestone.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, apperrors.ErrMilestoneNotFound
 	}

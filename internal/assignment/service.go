@@ -40,6 +40,16 @@ func (s *Service) Create(ctx context.Context, orgID uuid.UUID, userID uuid.UUID,
 	}
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		if err := s.Repo.EnsureProjectInOrganization(dbCtx, tx, orgID, projectID); err != nil {
+			return err
+		}
+		if err := s.Repo.EnsureMilestoneInProject(dbCtx, tx, orgID, projectID, milestoneID); err != nil {
+			return err
+		}
+		if err := s.Repo.EnsureActiveMember(dbCtx, tx, orgID, assignedTo); err != nil {
+			return err
+		}
+
 		err := s.Repo.Create(dbCtx, tx, assignment)
 		if err != nil {
 			return err
@@ -79,14 +89,14 @@ func (s *Service) Create(ctx context.Context, orgID uuid.UUID, userID uuid.UUID,
 	return assignment, err
 }
 
-func (s *Service) GetByID(ctx context.Context, orgID uuid.UUID, assignmentID uuid.UUID) (*Assignment, error) {
+func (s *Service) GetByID(ctx context.Context, orgID uuid.UUID, projectID uuid.UUID, assignmentID uuid.UUID) (*Assignment, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
 	assignment := &Assignment{}
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		err := s.Repo.GetByIDAndOrganizationID(dbCtx, tx, orgID, assignmentID, assignment)
+		err := s.Repo.GetByIDAndProjectIDAndOrganizationID(dbCtx, tx, orgID, projectID, assignmentID, assignment)
 		if err != nil {
 			return err
 		}
@@ -118,11 +128,15 @@ func (s *Service) Update(ctx context.Context, orgID uuid.UUID, userID uuid.UUID,
 	assignment := &Assignment{}
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		if err := s.Repo.GetByIDAndOrganizationID(dbCtx, tx, orgID, assignmentID, assignment); err != nil {
+		if err := s.Repo.GetByIDAndProjectIDAndOrganizationID(dbCtx, tx, orgID, projectID, assignmentID, assignment); err != nil {
 			return err
 		}
 
-		if err := s.Repo.UpdateAssignedTo(dbCtx, tx, orgID, assignmentID, assignedTo); err != nil {
+		if err := s.Repo.EnsureActiveMember(dbCtx, tx, orgID, assignedTo); err != nil {
+			return err
+		}
+
+		if err := s.Repo.UpdateAssignedTo(dbCtx, tx, orgID, projectID, assignmentID, assignedTo); err != nil {
 			return err
 		}
 
@@ -168,11 +182,11 @@ func (s *Service) Delete(ctx context.Context, orgID uuid.UUID, userID uuid.UUID,
 	return db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		current := &Assignment{}
 
-		if err := s.Repo.GetByIDAndOrganizationID(dbCtx, tx, orgID, assignmentID, current); err != nil {
+		if err := s.Repo.GetByIDAndProjectIDAndOrganizationID(dbCtx, tx, orgID, projectID, assignmentID, current); err != nil {
 			return err
 		}
 
-		if err := s.Repo.Delete(dbCtx, tx, orgID, assignmentID); err != nil {
+		if err := s.Repo.Delete(dbCtx, tx, orgID, projectID, assignmentID); err != nil {
 			return err
 		}
 

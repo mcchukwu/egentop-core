@@ -221,6 +221,12 @@ func (h *Handler) ListMilestonesByProjectID(w http.ResponseWriter, r *http.Reque
 
 // GetMilestoneByID gets a milestone by ID - /projects/{project_id}/milestones/{milestone_id}
 func (h *Handler) GetMilestoneByID(w http.ResponseWriter, r *http.Request) {
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
 	milestoneID, err := uuid.Parse(r.PathValue("milestoneID"))
 	if err != nil {
 		response.HandleError(w, apperrors.ErrInvalidRequestBody)
@@ -239,7 +245,7 @@ func (h *Handler) GetMilestoneByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	milestone, err := h.Service.GetMilestoneByID(r.Context(), orgID, milestoneID)
+	milestone, err := h.Service.GetMilestoneByID(r.Context(), orgID, projectID, milestoneID)
 	if err != nil {
 		response.HandleError(w, err)
 		return
@@ -281,7 +287,13 @@ func (h *Handler) UpdateMilestone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	milestone, err := h.Service.UpdateMilestone(r.Context(), orgID, userID, milestoneID, req)
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestone, err := h.Service.UpdateMilestone(r.Context(), orgID, userID, projectID, milestoneID, req)
 	if err != nil {
 		response.HandleError(w, err)
 		return

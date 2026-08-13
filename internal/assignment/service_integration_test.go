@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/mcchukwu/egentop/internal/activity"
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/audit"
 	"github.com/mcchukwu/egentop/pkg/pagination"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func integrationDB(t *testing.T) *sql.DB {
@@ -149,7 +149,7 @@ func TestAssignmentCreateAndViewScopedToOrg(t *testing.T) {
 	}
 
 	// fetch within the same org succeeds
-	fetched, err := svc.GetByID(ctx, s.OrgID, assignment.ID)
+	fetched, err := svc.GetByID(ctx, s.OrgID, s.ProjectID, assignment.ID)
 	if err != nil {
 		t.Fatalf("GetByID same org: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestAssignmentCreateAndViewScopedToOrg(t *testing.T) {
 
 	// a different org cannot read the assignment (tenant isolation)
 	other := seedOrg(t, db, uuid.NewString())
-	_, err = svc.GetByID(ctx, other.OrgID, assignment.ID)
+	_, err = svc.GetByID(ctx, other.OrgID, s.ProjectID, assignment.ID)
 	if !errors.Is(err, apperrors.ErrAssignmentNotFound) {
 		t.Fatalf("expected ErrAssignmentNotFound for cross-org fetch, got %v", err)
 	}
@@ -224,8 +224,153 @@ func TestAssignmentListUpdateDelete(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	_, err = svc.GetByID(ctx, s.OrgID, assignment.ID)
+	_, err = svc.GetByID(ctx, s.OrgID, s.ProjectID, assignment.ID)
 	if !errors.Is(err, apperrors.ErrAssignmentNotFound) {
 		t.Fatalf("expected ErrAssignmentNotFound after delete, got %v", err)
+	}
+}
+
+func TestAssignmentNestedParentScope(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+	s := seedOrg(t, db, uuid.NewString())
+	otherProjectID, _ := seedAdditionalAssignmentProject(t, db, s.OrgID, s.UserID)
+	assignment, err := svc.Create(ctx, s.OrgID, s.UserID, s.ProjectID, s.Milestone, s.MemberID)
+	if err != nil {
+		t.Fatalf("same-project assignment create: %v", err)
+	}
+	if _, err := svc.GetByID(ctx, s.OrgID, otherProjectID, assignment.ID); !errors.Is(err, apperrors.ErrAssignmentNotFound) {
+		t.Fatalf("wrong-parent assignment read error = %v, want ErrAssignmentNotFound", err)
+	}
+	if _, err := svc.Update(ctx, s.OrgID, s.UserID, otherProjectID, assignment.ID, s.UserID); !errors.Is(err, apperrors.ErrAssignmentNotFound) {
+		t.Fatalf("wrong-parent assignment update error = %v, want ErrAssignmentNotFound", err)
+	}
+	unchanged, err := svc.GetByID(ctx, s.OrgID, s.ProjectID, assignment.ID)
+	if err != nil {
+		t.Fatalf("read assignment after rejected update: %v", err)
+	}
+	if unchanged.AssignedTo != s.MemberID {
+		t.Fatalf("wrong-parent update changed assignee to %s", unchanged.AssignedTo)
+	}
+	if err := svc.Delete(ctx, s.OrgID, s.UserID, otherProjectID, assignment.ID); !errors.Is(err, apperrors.ErrAssignmentNotFound) {
+		t.Fatalf("wrong-parent assignment delete error = %v, want ErrAssignmentNotFound", err)
+	}
+	if _, err := svc.GetByID(ctx, s.OrgID, s.ProjectID, assignment.ID); err != nil {
+		t.Fatalf("wrong-parent delete removed assignment: %v", err)
+	}
+	if err := svc.Delete(ctx, s.OrgID, s.UserID, s.ProjectID, assignment.ID); err != nil {
+		t.Fatalf("same-project assignment delete: %v", err)
+	}
+}
+
+func TestAssignmentCreateValidatesRelationshipsAndAssignee(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+	s := seedOrg(t, db, uuid.NewString())
+	other := seedOrg(t, db, uuid.NewString())
+	otherProjectID, otherMilestoneID := seedAdditionalAssignmentProject(t, db, s.OrgID, s.UserID)
+
+	tests := []struct {
+		name                                      string
+		orgID, projectID, milestoneID, assignedTo uuid.UUID
+		want                                      error
+	}{
+		{"cross-org project", s.OrgID, other.ProjectID, s.Milestone, s.MemberID, apperrors.ErrProjectNotFound},
+		{"cross-project milestone", s.OrgID, s.ProjectID, otherMilestoneID, s.MemberID, apperrors.ErrMilestoneNotFound},
+		{"cross-org milestone", s.OrgID, s.ProjectID, other.Milestone, s.MemberID, apperrors.ErrMilestoneNotFound},
+		{"non-member assignee", s.OrgID, s.ProjectID, s.Milestone, uuid.New(), apperrors.ErrMembershipNotFound},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.Create(ctx, tc.orgID, s.UserID, tc.projectID, tc.milestoneID, tc.assignedTo)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Create error = %v, want %v", err, tc.want)
+			}
+		})
+	}
+
+	suspended := seedAssignmentUser(t, db, "suspended-"+uuid.NewString()+"@example.com")
+	seedAssignmentMembership(t, db, suspended, s.OrgID, "suspended")
+	if _, err := svc.Create(ctx, s.OrgID, s.UserID, otherProjectID, otherMilestoneID, suspended); !errors.Is(err, apperrors.ErrMembershipNotFound) {
+		t.Fatalf("suspended assignee error = %v, want ErrMembershipNotFound", err)
+	}
+	if _, err := svc.Create(ctx, s.OrgID, s.UserID, otherProjectID, otherMilestoneID, s.MemberID); err != nil {
+		t.Fatalf("valid same-project assignment create: %v", err)
+	}
+}
+
+func TestAssignmentUpdateRejectsInactiveAssigneeAndPreservesAssignment(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+	s := seedOrg(t, db, uuid.NewString())
+	assignment, err := svc.Create(ctx, s.OrgID, s.UserID, s.ProjectID, s.Milestone, s.MemberID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	suspended := seedAssignmentUser(t, db, "reassign-suspended-"+uuid.NewString()+"@example.com")
+	seedAssignmentMembership(t, db, suspended, s.OrgID, "suspended")
+
+	for _, tc := range []struct {
+		name       string
+		assignedTo uuid.UUID
+	}{
+		{name: "non-member", assignedTo: uuid.New()},
+		{name: "suspended-member", assignedTo: suspended},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := svc.Update(ctx, s.OrgID, s.UserID, s.ProjectID, assignment.ID, tc.assignedTo); !errors.Is(err, apperrors.ErrMembershipNotFound) {
+				t.Fatalf("Update error = %v, want ErrMembershipNotFound", err)
+			}
+
+			unchanged, err := svc.GetByID(ctx, s.OrgID, s.ProjectID, assignment.ID)
+			if err != nil {
+				t.Fatalf("read assignment after rejected update: %v", err)
+			}
+			if unchanged.AssignedTo != s.MemberID {
+				t.Fatalf("rejected update changed assignee to %s", unchanged.AssignedTo)
+			}
+		})
+	}
+}
+
+func seedAdditionalAssignmentProject(t *testing.T, db *sql.DB, orgID, ownerID uuid.UUID) (projectID, milestoneID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	if err := db.QueryRowContext(ctx, `INSERT INTO projects (organization_id, created_by, name, status) VALUES ($1, $2, $3, 'active') RETURNING id`, orgID, ownerID, "Assignment Project "+uuid.NewString()).Scan(&projectID); err != nil {
+		t.Fatalf("insert assignment project: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `INSERT INTO milestones (organization_id, project_id, created_by, title, status) VALUES ($1, $2, $3, $4, 'pending') RETURNING id`, orgID, projectID, ownerID, "Assignment Milestone "+uuid.NewString()).Scan(&milestoneID); err != nil {
+		t.Fatalf("insert assignment milestone: %v", err)
+	}
+	return projectID, milestoneID
+}
+
+func seedAssignmentUser(t *testing.T, db *sql.DB, email string) uuid.UUID {
+	t.Helper()
+	var userID uuid.UUID
+	if err := db.QueryRowContext(context.Background(), `INSERT INTO users (email, password_hash, first_name, last_name) VALUES ($1, 'hash', 'Assignment', 'User') RETURNING id`, email).Scan(&userID); err != nil {
+		t.Fatalf("insert assignment user: %v", err)
+	}
+	return userID
+}
+
+func seedAssignmentMembership(t *testing.T, db *sql.DB, userID, orgID uuid.UUID, status string) {
+	t.Helper()
+	var roleID uuid.UUID
+	if err := db.QueryRowContext(context.Background(), `SELECT id FROM roles WHERE name = 'member' AND organization_id IS NULL`).Scan(&roleID); err != nil {
+		t.Fatalf("member role: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO memberships (user_id, organization_id, role_id, status) VALUES ($1, $2, $3, $4)`, userID, orgID, roleID, status); err != nil {
+		t.Fatalf("insert assignment membership: %v", err)
 	}
 }

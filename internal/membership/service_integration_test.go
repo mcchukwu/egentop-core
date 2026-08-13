@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/audit"
 	"github.com/mcchukwu/egentop/pkg/pagination"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func integrationDB(t *testing.T) *sql.DB {
@@ -74,6 +74,39 @@ func seedOwnerMembership(t *testing.T, db *sql.DB, email string) (userID, orgID 
 	}
 
 	return userID, orgID
+}
+
+func seedUser(t *testing.T, db *sql.DB, email string) uuid.UUID {
+	t.Helper()
+
+	var userID uuid.UUID
+	err := db.QueryRowContext(context.Background(), `
+		INSERT INTO users (email, password_hash, first_name, last_name)
+		VALUES ($1, 'hash', 'Test', 'User')
+		RETURNING id
+	`, email).Scan(&userID)
+	if err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+
+	return userID
+}
+
+func seedMembershipRole(t *testing.T, db *sql.DB, userID, orgID uuid.UUID, role Role) {
+	t.Helper()
+
+	roleID, err := ResolveSystemRoleID(context.Background(), db, role)
+	if err != nil {
+		t.Fatalf("resolve role: %v", err)
+	}
+
+	_, err = db.ExecContext(context.Background(), `
+		INSERT INTO memberships (user_id, organization_id, role_id)
+		VALUES ($1, $2, $3)
+	`, userID, orgID, roleID)
+	if err != nil {
+		t.Fatalf("insert membership: %v", err)
+	}
 }
 
 func TestMembershipServiceIntegration(t *testing.T) {
@@ -245,4 +278,142 @@ func TestInviteOrgMemberByEmail(t *testing.T) {
 			t.Fatalf("expected ErrUserNotFound, got %v", err)
 		}
 	})
+}
+
+func TestAdminCannotGrantOwner(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	_, orgID := seedOwnerMembership(t, db, "grant-owner-"+uuid.NewString()+"@example.com")
+	adminID := seedUser(t, db, "grant-admin-"+uuid.NewString()+"@example.com")
+	seedMembershipRole(t, db, adminID, orgID, RoleAdmin)
+
+	addTargetID := seedUser(t, db, "add-owner-target-"+uuid.NewString()+"@example.com")
+	updateTargetID := seedUser(t, db, "update-owner-target-"+uuid.NewString()+"@example.com")
+	seedMembershipRole(t, db, updateTargetID, orgID, RoleMember)
+	inviteEmail := "invite-owner-target-" + uuid.NewString() + "@example.com"
+	inviteTargetID := seedUser(t, db, inviteEmail)
+
+	svc := NewService(db, audit.NewService(db))
+
+	t.Run("admin cannot add owner", func(t *testing.T) {
+		err := svc.AddOrgMember(ctx, orgID, adminID, addTargetID, RoleOwner)
+		if !errors.Is(err, apperrors.ErrForbidden) {
+			t.Fatalf("expected ErrForbidden, got %v", err)
+		}
+
+		var count int
+		if err := db.QueryRowContext(ctx, `
+		SELECT count(*)
+		FROM memberships
+		WHERE organization_id = $1 AND user_id = $2
+		`, orgID, addTargetID).Scan(&count); err != nil {
+			t.Fatalf("count added membership: %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("expected no membership, got %d", count)
+		}
+	})
+
+	t.Run("admin cannot promote member to owner", func(t *testing.T) {
+		err := svc.UpdateOrgMemberRole(ctx, orgID, adminID, updateTargetID, RoleOwner)
+		if !errors.Is(err, apperrors.ErrForbidden) {
+			t.Fatalf("expected ErrForbidden, got %v", err)
+		}
+
+		var role string
+		if err := db.QueryRowContext(ctx, `
+			SELECT r.name
+		FROM memberships m
+		JOIN roles r ON r.id = m.role_id
+		WHERE m.organization_id = $1 AND m.user_id = $2
+		`, orgID, updateTargetID).Scan(&role); err != nil {
+			t.Fatalf("verify unchanged membership role: %v", err)
+		}
+		if role != string(RoleMember) {
+			t.Fatalf("membership role = %s, want %s", role, RoleMember)
+		}
+	})
+
+	t.Run("admin cannot invite owner", func(t *testing.T) {
+		err := svc.InviteOrgMember(ctx, orgID, adminID, inviteEmail, RoleOwner)
+		if !errors.Is(err, apperrors.ErrForbidden) {
+			t.Fatalf("expected ErrForbidden, got %v", err)
+		}
+
+		var count int
+		if err := db.QueryRowContext(ctx, `
+			SELECT count(*)
+			FROM memberships
+			WHERE organization_id = $1 AND user_id = $2
+		`, orgID, inviteTargetID).Scan(&count); err != nil {
+			t.Fatalf("count invited membership: %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("expected no membership, got %d", count)
+		}
+	})
+}
+
+func TestOwnerCanGrantOwner(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	ownerID, orgID := seedOwnerMembership(t, db, "owner-grant-"+uuid.NewString()+"@example.com")
+	addTargetID := seedUser(t, db, "owner-add-target-"+uuid.NewString()+"@example.com")
+	updateTargetID := seedUser(t, db, "owner-update-target-"+uuid.NewString()+"@example.com")
+	seedMembershipRole(t, db, updateTargetID, orgID, RoleMember)
+	inviteEmail := "owner-invite-target-" + uuid.NewString() + "@example.com"
+	inviteTargetID := seedUser(t, db, inviteEmail)
+
+	svc := NewService(db, audit.NewService(db))
+
+	if err := svc.AddOrgMember(ctx, orgID, ownerID, addTargetID, RoleOwner); err != nil {
+		t.Fatalf("owner AddOrgMember: %v", err)
+	}
+	if err := svc.InviteOrgMember(ctx, orgID, ownerID, inviteEmail, RoleOwner); err != nil {
+		t.Fatalf("owner InviteOrgMember: %v", err)
+	}
+	if err := svc.UpdateOrgMemberRole(ctx, orgID, ownerID, updateTargetID, RoleOwner); err != nil {
+		t.Fatalf("owner UpdateOrgMemberRole: %v", err)
+	}
+
+	var addedRole, updatedRole, invitedRole string
+	if err := db.QueryRowContext(ctx, `
+		SELECT r.name
+		FROM memberships m
+		JOIN roles r ON r.id = m.role_id
+		WHERE m.organization_id = $1 AND m.user_id = $2
+	`, orgID, addTargetID).Scan(&addedRole); err != nil {
+		t.Fatalf("verify added owner membership: %v", err)
+	}
+	if addedRole != string(RoleOwner) {
+		t.Fatalf("added role = %s, want owner", addedRole)
+	}
+
+	if err := db.QueryRowContext(ctx, `
+		SELECT r.name
+		FROM memberships m
+		JOIN roles r ON r.id = m.role_id
+		WHERE m.organization_id = $1 AND m.user_id = $2
+	`, orgID, updateTargetID).Scan(&updatedRole); err != nil {
+		t.Fatalf("verify updated owner membership: %v", err)
+	}
+	if updatedRole != string(RoleOwner) {
+		t.Fatalf("updated role = %s, want owner", updatedRole)
+	}
+
+	if err := db.QueryRowContext(ctx, `
+		SELECT r.name
+		FROM memberships m
+		JOIN roles r ON r.id = m.role_id
+		WHERE m.organization_id = $1 AND m.user_id = $2
+	`, orgID, inviteTargetID).Scan(&invitedRole); err != nil {
+		t.Fatalf("verify invited owner membership: %v", err)
+	}
+	if invitedRole != string(RoleOwner) {
+		t.Fatalf("invited role = %s, want owner", invitedRole)
+	}
 }

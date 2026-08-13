@@ -1,0 +1,154 @@
+package assignment
+
+import (
+	"bytes"
+	"database/sql"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/mcchukwu/egentop/internal/middleware"
+	"github.com/mcchukwu/egentop/internal/requestctx"
+	"github.com/mcchukwu/egentop/internal/validation"
+)
+
+type assignmentHTTPErrorResponse struct {
+	Error struct {
+		Code string `json:"code"`
+	} `json:"error"`
+}
+
+// assignmentHandler mirrors the production assignment route chain after
+// authentication. The authenticated user is injected into the request context
+// so the organization, membership, and permission middleware are exercised.
+func assignmentHandler(db *sql.DB, service *Service) http.Handler {
+	h := NewHandler(service)
+	org := middleware.NewOrgMiddleware(db)
+	access := middleware.NewOrgAccessMiddleware(db)
+	rbac := middleware.NewRBACMiddleware(db)
+
+	mux := http.NewServeMux()
+	mux.Handle("POST /v1/orgs/{orgID}/projects/{projectID}/assignments", org.LoadOrg(access.RequireMembership(rbac.RequirePermission("assignment.create")(http.HandlerFunc(h.Create)))))
+	mux.Handle("GET /v1/orgs/{orgID}/projects/{projectID}/assignments/{assignmentID}", org.LoadOrg(access.RequireMembership(rbac.RequirePermission("assignment.view")(http.HandlerFunc(h.GetByID)))))
+	mux.Handle("PATCH /v1/orgs/{orgID}/projects/{projectID}/assignments/{assignmentID}", org.LoadOrg(access.RequireMembership(rbac.RequirePermission("assignment.update")(http.HandlerFunc(h.Update)))))
+	mux.Handle("DELETE /v1/orgs/{orgID}/projects/{projectID}/assignments/{assignmentID}", org.LoadOrg(access.RequireMembership(rbac.RequirePermission("assignment.remove")(http.HandlerFunc(h.Delete)))))
+	return mux
+}
+
+func doAssignmentRequest(t *testing.T, handler http.Handler, method, path string, userID uuid.UUID, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	req = req.WithContext(requestctx.WithUserID(req.Context(), userID))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
+}
+
+func decodeAssignmentHTTPError(t *testing.T, rr *httptest.ResponseRecorder) assignmentHTTPErrorResponse {
+	t.Helper()
+	var response assignmentHTTPErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode error response: %v; body=%s", err, rr.Body.String())
+	}
+	return response
+}
+
+func TestAssignmentHTTPWrongProjectIsNotFound(t *testing.T) {
+	validation.Init()
+	db := integrationDB(t)
+	defer db.Close()
+
+	s := seedOrg(t, db, uuid.NewString())
+	otherProjectID, _ := seedAdditionalAssignmentProject(t, db, s.OrgID, s.UserID)
+	service := newTestService(db)
+	assignment, err := service.Create(t.Context(), s.OrgID, s.UserID, s.ProjectID, s.Milestone, s.MemberID)
+	if err != nil {
+		t.Fatalf("create assignment: %v", err)
+	}
+
+	handler := assignmentHandler(db, service)
+	path := "/v1/orgs/" + s.OrgID.String() + "/projects/" + otherProjectID.String() + "/assignments/" + assignment.ID.String()
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		body   []byte
+	}{
+		{name: "read", method: http.MethodGet},
+		{name: "update", method: http.MethodPatch, body: []byte(`{"assigned_to":"` + s.UserID.String() + `"}`)},
+		{name: "delete", method: http.MethodDelete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := doAssignmentRequest(t, handler, tc.method, path, s.UserID, tc.body)
+			if rr.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+			}
+			if got := decodeAssignmentHTTPError(t, rr).Error.Code; got != "assignment_not_found" {
+				t.Fatalf("error code = %q, want assignment_not_found", got)
+			}
+
+			unchanged, err := service.GetByID(t.Context(), s.OrgID, s.ProjectID, assignment.ID)
+			if err != nil {
+				t.Fatalf("read assignment after rejected wrong-project %s: %v", tc.name, err)
+			}
+			if unchanged.AssignedTo != assignment.AssignedTo {
+				t.Fatalf("wrong-project HTTP %s changed assignee to %s", tc.name, unchanged.AssignedTo)
+			}
+			if unchanged.ProjectID == nil || *unchanged.ProjectID != s.ProjectID {
+				t.Fatalf("wrong-project HTTP %s changed parent project to %v", tc.name, unchanged.ProjectID)
+			}
+		})
+	}
+
+	if _, err := service.GetByID(t.Context(), s.OrgID, s.ProjectID, assignment.ID); err != nil {
+		t.Fatalf("wrong-project HTTP operations removed assignment: %v", err)
+	}
+}
+
+func TestAssignmentCreateHTTPRejectsInvalidReferencesWithoutRows(t *testing.T) {
+	validation.Init()
+	db := integrationDB(t)
+	defer db.Close()
+
+	s := seedOrg(t, db, uuid.NewString())
+	other := seedOrg(t, db, uuid.NewString())
+	_, otherMilestoneID := seedAdditionalAssignmentProject(t, db, s.OrgID, s.UserID)
+	service := newTestService(db)
+	handler := assignmentHandler(db, service)
+
+	tests := []struct {
+		name       string
+		projectID  uuid.UUID
+		milestone  uuid.UUID
+		assignedTo uuid.UUID
+		wantCode   string
+	}{
+		{name: "cross-org project", projectID: other.ProjectID, milestone: s.Milestone, assignedTo: s.MemberID, wantCode: "project_not_found"},
+		{name: "cross-project milestone", projectID: s.ProjectID, milestone: otherMilestoneID, assignedTo: s.MemberID, wantCode: "milestone_not_found"},
+		{name: "cross-org milestone", projectID: s.ProjectID, milestone: other.Milestone, assignedTo: s.MemberID, wantCode: "milestone_not_found"},
+		{name: "invalid assignee", projectID: s.ProjectID, milestone: s.Milestone, assignedTo: uuid.New(), wantCode: "membership_not_found"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"milestone_id":"` + tc.milestone.String() + `","assigned_to":"` + tc.assignedTo.String() + `"}`)
+			rr := doAssignmentRequest(t, handler, http.MethodPost, "/v1/orgs/"+s.OrgID.String()+"/projects/"+tc.projectID.String()+"/assignments", s.UserID, body)
+			if rr.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+			}
+			if got := decodeAssignmentHTTPError(t, rr).Error.Code; got != tc.wantCode {
+				t.Fatalf("error code = %q, want %q", got, tc.wantCode)
+			}
+
+			var count int
+			if err := db.QueryRowContext(t.Context(), `SELECT count(*) FROM assignments WHERE organization_id = $1`, s.OrgID).Scan(&count); err != nil {
+				t.Fatalf("count assignments: %v", err)
+			}
+			if count != 0 {
+				t.Fatalf("expected no assignment rows, got %d", count)
+			}
+		})
+	}
+}

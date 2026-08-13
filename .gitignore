@@ -51,5 +51,9 @@ coverage/
 # AI / AGENT PROJECT MEMORY
 .captain/
 
+# OPENCODE PROJECT AGENTS
+.opencode/
+opencode.json
+
 # GENERATED FILES
 *.out

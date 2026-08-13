@@ -308,16 +308,16 @@ func (s *Service) ListMilestonesByProjectID(ctx context.Context, organizationID 
 }
 
 // GetMilestoneByID gets a milestone by ID, scoped to the actor's organization.
-func (s *Service) GetMilestoneByID(ctx context.Context, organizationID uuid.UUID, milestoneID uuid.UUID) (*Milestone, error) {
+func (s *Service) GetMilestoneByID(ctx context.Context, organizationID uuid.UUID, projectID uuid.UUID, milestoneID uuid.UUID) (*Milestone, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	return s.Repo.GetMilestoneByIDAndOrganizationID(dbCtx, milestoneID, organizationID)
+	return s.Repo.GetMilestoneByIDAndProjectIDAndOrganizationID(dbCtx, milestoneID, projectID, organizationID)
 }
 
 // Update updates a milestone's metadata (title, description, due date and/or
 // position). Fields left empty in the request are unchanged.
-func (s *Service) UpdateMilestone(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, milestoneID uuid.UUID, req UpdateMilestoneRequest) (*Milestone, error) {
+func (s *Service) UpdateMilestone(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, projectID uuid.UUID, milestoneID uuid.UUID, req UpdateMilestoneRequest) (*Milestone, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
@@ -325,7 +325,7 @@ func (s *Service) UpdateMilestone(ctx context.Context, orgID uuid.UUID, userID u
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		// Verify the milestone belongs to the actor organization
-		milestone, err := s.ensureMilestoneAccess(dbCtx, milestoneID, orgID)
+		milestone, err := s.ensureMilestoneAccess(dbCtx, projectID, milestoneID, orgID)
 		if err != nil {
 			return err
 		}
@@ -353,7 +353,7 @@ func (s *Service) UpdateMilestone(ctx context.Context, orgID uuid.UUID, userID u
 			return nil
 		}
 
-		if err := s.Repo.UpdateMilestoneDetails(dbCtx, tx, milestoneID, title, description, dueDate, position); err != nil {
+		if err := s.Repo.UpdateMilestoneDetails(dbCtx, tx, milestoneID, projectID, orgID, title, description, dueDate, position); err != nil {
 			return err
 		}
 
@@ -396,7 +396,7 @@ func (s *Service) UpdateMilestone(ctx context.Context, orgID uuid.UUID, userID u
 	}
 
 	if updated == nil {
-		return s.GetMilestoneByID(ctx, orgID, milestoneID)
+		return s.GetMilestoneByID(ctx, orgID, projectID, milestoneID)
 	}
 
 	return updated, nil
@@ -412,8 +412,8 @@ func (s *Service) ensureProjectAccess(ctx context.Context, projectID uuid.UUID, 
 }
 
 // Ensure milestone is accessible by the user
-func (s *Service) ensureMilestoneAccess(ctx context.Context, milestoneID uuid.UUID, organizationID uuid.UUID) (*Milestone, error) {
-	milestone, err := s.Repo.GetMilestoneByIDAndOrganizationID(ctx, milestoneID, organizationID)
+func (s *Service) ensureMilestoneAccess(ctx context.Context, projectID uuid.UUID, milestoneID uuid.UUID, organizationID uuid.UUID) (*Milestone, error) {
+	milestone, err := s.Repo.GetMilestoneByIDAndProjectIDAndOrganizationID(ctx, milestoneID, projectID, organizationID)
 
 	return milestone, err
 }

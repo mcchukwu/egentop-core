@@ -93,6 +93,24 @@ func seedProject(t *testing.T, db *sql.DB) (ownerID, orgID, projectID, milestone
 	return ownerID, orgID, projectID, milestoneID
 }
 
+func seedAdditionalProject(t *testing.T, db *sql.DB, orgID, ownerID uuid.UUID) (projectID, milestoneID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO projects (organization_id, created_by, name, status)
+		VALUES ($1, $2, $3, 'active') RETURNING id
+	`, orgID, ownerID, "Project "+uuid.NewString()).Scan(&projectID); err != nil {
+		t.Fatalf("insert additional project: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO milestones (organization_id, project_id, created_by, title, status)
+		VALUES ($1, $2, $3, $4, 'pending') RETURNING id
+	`, orgID, projectID, ownerID, "Milestone "+uuid.NewString()).Scan(&milestoneID); err != nil {
+		t.Fatalf("insert additional milestone: %v", err)
+	}
+	return projectID, milestoneID
+}
+
 func TestUpdateProjectMetadata(t *testing.T) {
 	db := integrationDB(t)
 	defer db.Close()
@@ -163,9 +181,9 @@ func TestUpdateMilestoneMetadata(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService(db)
 
-	ownerID, orgID, _, milestoneID := seedProject(t, db)
+	ownerID, orgID, projectID, milestoneID := seedProject(t, db)
 
-	updated, err := svc.UpdateMilestone(ctx, orgID, ownerID, milestoneID, UpdateMilestoneRequest{
+	updated, err := svc.UpdateMilestone(ctx, orgID, ownerID, projectID, milestoneID, UpdateMilestoneRequest{
 		Title:    "Renamed Milestone",
 		Position: 3,
 	})
@@ -198,7 +216,7 @@ func TestProjectReadsScopedToOrg(t *testing.T) {
 	if _, err := svc.GetByID(ctx, orgAID, projectAID); err != nil {
 		t.Fatalf("GetByID same org: %v", err)
 	}
-	if _, err := svc.GetMilestoneByID(ctx, orgAID, milestoneAID); err != nil {
+	if _, err := svc.GetMilestoneByID(ctx, orgAID, projectAID, milestoneAID); err != nil {
 		t.Fatalf("GetMilestoneByID same org: %v", err)
 	}
 	milestones, meta, err := svc.ListMilestonesByProjectID(ctx, orgAID, projectAID, pagination.Query{Page: 1, Limit: 20})
@@ -214,7 +232,7 @@ func TestProjectReadsScopedToOrg(t *testing.T) {
 	if !errors.Is(err, apperrors.ErrProjectNotFound) {
 		t.Fatalf("expected ErrProjectNotFound for cross-org GetByID, got %v", err)
 	}
-	_, err = svc.GetMilestoneByID(ctx, orgBID, milestoneAID)
+	_, err = svc.GetMilestoneByID(ctx, orgBID, projectAID, milestoneAID)
 	if !errors.Is(err, apperrors.ErrMilestoneNotFound) {
 		t.Fatalf("expected ErrMilestoneNotFound for cross-org GetMilestoneByID, got %v", err)
 	}
@@ -224,5 +242,39 @@ func TestProjectReadsScopedToOrg(t *testing.T) {
 	}
 	if len(crossMilestones) != 0 || crossMeta.Total != 0 {
 		t.Fatalf("expected no cross-org milestones, got %d (total %d)", len(crossMilestones), crossMeta.Total)
+	}
+}
+
+func TestMilestoneNestedParentScope(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+	ownerID, orgID, projectID, milestoneID := seedProject(t, db)
+	otherProjectID, _ := seedAdditionalProject(t, db, orgID, ownerID)
+
+	if _, err := svc.GetMilestoneByID(ctx, orgID, projectID, milestoneID); err != nil {
+		t.Fatalf("same-project milestone read: %v", err)
+	}
+	if _, err := svc.GetMilestoneByID(ctx, orgID, otherProjectID, milestoneID); !errors.Is(err, apperrors.ErrMilestoneNotFound) {
+		t.Fatalf("wrong-parent milestone read error = %v, want ErrMilestoneNotFound", err)
+	}
+	if _, err := svc.UpdateMilestone(ctx, orgID, ownerID, otherProjectID, milestoneID, UpdateMilestoneRequest{Title: "Should Not Update"}); !errors.Is(err, apperrors.ErrMilestoneNotFound) {
+		t.Fatalf("wrong-parent milestone update error = %v, want ErrMilestoneNotFound", err)
+	}
+	unchanged, err := svc.GetMilestoneByID(ctx, orgID, projectID, milestoneID)
+	if err != nil {
+		t.Fatalf("read milestone after rejected update: %v", err)
+	}
+	if unchanged.Title != "Milestone" {
+		t.Fatalf("wrong-parent update changed milestone title to %q", unchanged.Title)
+	}
+	updated, err := svc.UpdateMilestone(ctx, orgID, ownerID, projectID, milestoneID, UpdateMilestoneRequest{Title: "Updated Correctly"})
+	if err != nil {
+		t.Fatalf("same-project milestone update: %v", err)
+	}
+	if updated.Title != "Updated Correctly" {
+		t.Fatalf("same-project milestone title = %q", updated.Title)
 	}
 }

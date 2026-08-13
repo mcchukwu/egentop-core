@@ -90,7 +90,13 @@ func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	assignment, err := h.Service.GetByID(r.Context(), organizationID, assignmentID)
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	assignment, err := h.Service.GetByID(r.Context(), organizationID, projectID, assignmentID)
 	if err != nil {
 		response.HandleError(w, err)
 		return
