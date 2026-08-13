@@ -93,37 +93,6 @@ func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID uu
 	return projects, total, nil
 }
 
-// GetProjectByID gets a project by ID
-func (r *Repository) GetByID(ctx context.Context, projectID uuid.UUID) (*Project, error) {
-	query := `
-		SELECT
-			id,
-			organization_id,
-			name,
-			description,
-			status,
-			priority,
-			created_by,
-			due_date,
-			created_at,
-			updated_at
-		FROM projects
-		WHERE id = $1
-	`
-
-	project := &Project{}
-
-	err := r.DB.QueryRowContext(ctx, query, projectID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.CreatedAt, &project.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, apperrors.ErrProjectNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	return project, nil
-}
-
 // UpdateDetails updates a project's metadata (name, description, priority,
 // due date and/or status). Nil fields are left unchanged.
 func (r *Repository) UpdateDetails(ctx context.Context, tx *sql.Tx, projectID uuid.UUID, name *string, description *string, priority *ProjectPriority, status *ProjectStatus, dueDate *time.Time) error {
@@ -184,8 +153,8 @@ func (r *Repository) CreateMilestone(ctx context.Context, tx *sql.Tx, milestone 
 	return nil
 }
 
-// ListMilestonesByProject lists all milestones for a project
-func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, projectID uuid.UUID, q pagination.Query) ([]Milestone, int, error) {
+// ListMilestonesByProject lists all milestones for a project, scoped to an organization
+func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, projectID uuid.UUID, organizationID uuid.UUID, q pagination.Query) ([]Milestone, int, error) {
 	var milestones []Milestone
 	var total int
 
@@ -193,9 +162,10 @@ func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, 
 		SELECT count(*)
 		FROM milestones
 		WHERE project_id = $1
+		AND organization_id = $2
 	`
 
-	if err := db.QueryRowContext(ctx, countQuery, projectID).Scan(&total); err != nil {
+	if err := db.QueryRowContext(ctx, countQuery, projectID, organizationID).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
@@ -215,11 +185,12 @@ func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, 
 			updated_at
 		FROM milestones
 		WHERE project_id = $1
+		AND organization_id = $2
 		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
+		LIMIT $3 OFFSET $4
 	`
 
-	rows, err := db.QueryContext(ctx, query, projectID, q.Limit, q.Offset())
+	rows, err := db.QueryContext(ctx, query, projectID, organizationID, q.Limit, q.Offset())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -241,39 +212,6 @@ func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, 
 	}
 
 	return milestones, total, nil
-}
-
-// GetMilestoneByID gets a milestone by ID
-func (r *Repository) GetMilestoneByID(ctx context.Context, db *sql.DB, milestoneID uuid.UUID) (*Milestone, error) {
-	query := `
-		SELECT
-			id,
-			project_id,
-			organization_id,
-			title,
-			description,
-			status,
-			due_date,
-			position,
-			completed_at,
-			created_by,
-			created_at,
-			updated_at
-		FROM milestones
-		WHERE id = $1
-	`
-
-	milestone := &Milestone{}
-
-	err := db.QueryRowContext(ctx, query, milestoneID).Scan(&milestone.ID, &milestone.ProjectID, &milestone.OrganizationID, &milestone.Title, &milestone.Description, &milestone.Status, &milestone.DueDate, &milestone.Position, &milestone.CompletedAt, &milestone.CreatedBy, &milestone.CreatedAt, &milestone.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, apperrors.ErrMilestoneNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	return milestone, nil
 }
 
 // UpdateMilestoneDetails updates a milestone's metadata (title, description,

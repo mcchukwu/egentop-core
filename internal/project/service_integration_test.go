@@ -3,14 +3,17 @@ package project
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mcchukwu/egentop/internal/activity"
-	"github.com/mcchukwu/egentop/internal/audit"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/mcchukwu/egentop/internal/activity"
+	"github.com/mcchukwu/egentop/internal/apperrors"
+	"github.com/mcchukwu/egentop/internal/audit"
+	"github.com/mcchukwu/egentop/pkg/pagination"
 )
 
 func integrationDB(t *testing.T) *sql.DB {
@@ -174,5 +177,52 @@ func TestUpdateMilestoneMetadata(t *testing.T) {
 	}
 	if updated.Position != 3 {
 		t.Fatalf("expected position 3, got %d", updated.Position)
+	}
+}
+
+// TestProjectReadsScopedToOrg proves that project/milestone read paths are
+// org-scoped: a second organization cannot read (or even detect the existence
+// of) another org's project or milestone.
+func TestProjectReadsScopedToOrg(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	// Org A owns the project and milestone; Org B must not be able to read them.
+	_, orgAID, projectAID, milestoneAID := seedProject(t, db)
+	_, orgBID, _, _ := seedProject(t, db)
+
+	// Positive: reads within the owning org succeed.
+	if _, err := svc.GetByID(ctx, orgAID, projectAID); err != nil {
+		t.Fatalf("GetByID same org: %v", err)
+	}
+	if _, err := svc.GetMilestoneByID(ctx, orgAID, milestoneAID); err != nil {
+		t.Fatalf("GetMilestoneByID same org: %v", err)
+	}
+	milestones, meta, err := svc.ListMilestonesByProjectID(ctx, orgAID, projectAID, pagination.Query{Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListMilestonesByProjectID same org: %v", err)
+	}
+	if len(milestones) != 1 || meta.Total != 1 {
+		t.Fatalf("expected 1 milestone in owning org, got %d (total %d)", len(milestones), meta.Total)
+	}
+
+	// Cross-org reads must not leak existence: they look identical to not-found.
+	_, err = svc.GetByID(ctx, orgBID, projectAID)
+	if !errors.Is(err, apperrors.ErrProjectNotFound) {
+		t.Fatalf("expected ErrProjectNotFound for cross-org GetByID, got %v", err)
+	}
+	_, err = svc.GetMilestoneByID(ctx, orgBID, milestoneAID)
+	if !errors.Is(err, apperrors.ErrMilestoneNotFound) {
+		t.Fatalf("expected ErrMilestoneNotFound for cross-org GetMilestoneByID, got %v", err)
+	}
+	crossMilestones, crossMeta, err := svc.ListMilestonesByProjectID(ctx, orgBID, projectAID, pagination.Query{Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("cross-org ListMilestonesByProjectID: %v", err)
+	}
+	if len(crossMilestones) != 0 || crossMeta.Total != 0 {
+		t.Fatalf("expected no cross-org milestones, got %d (total %d)", len(crossMilestones), crossMeta.Total)
 	}
 }

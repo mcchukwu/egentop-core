@@ -48,5 +48,8 @@ coverage/
 # AIR / HOT RELOAD
 .air/
 
+# AI / AGENT PROJECT MEMORY
+.captain/
+
 # GENERATED FILES
 *.out

@@ -113,12 +113,12 @@ func (s *Service) ListByOrganizationID(ctx context.Context, organizationID uuid.
 	return projects, pagination.NewMeta(q, total), nil
 }
 
-// GetProjectByID gets a project by ID
-func (s *Service) GetByID(ctx context.Context, projectID uuid.UUID) (*Project, error) {
+// GetProjectByID gets a project by ID, scoped to the actor's organization.
+func (s *Service) GetByID(ctx context.Context, organizationID uuid.UUID, projectID uuid.UUID) (*Project, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	return s.Repo.GetByID(dbCtx, projectID)
+	return s.Repo.GetProjectByIDAndOrganizationID(dbCtx, projectID, organizationID)
 }
 
 // Update updates a project's metadata (name, description, priority, due date
@@ -219,7 +219,7 @@ func (s *Service) Update(ctx context.Context, userID uuid.UUID, organizationID u
 	}
 
 	if updated == nil {
-		return s.GetByID(ctx, projectID)
+		return s.GetByID(ctx, organizationID, projectID)
 	}
 
 	return updated, nil
@@ -294,12 +294,12 @@ func (s *Service) CreateMilestone(ctx context.Context, organizationID uuid.UUID,
 	return milestone, err
 }
 
-// ListMilestones lists all milestones for a project
-func (s *Service) ListMilestonesByProjectID(ctx context.Context, projectID uuid.UUID, q pagination.Query) ([]Milestone, pagination.Meta, error) {
+// ListMilestones lists all milestones for a project, scoped to the actor's organization.
+func (s *Service) ListMilestonesByProjectID(ctx context.Context, organizationID uuid.UUID, projectID uuid.UUID, q pagination.Query) ([]Milestone, pagination.Meta, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	milestones, total, err := s.Repo.ListMilestonesByProjectID(dbCtx, s.DB, projectID, q)
+	milestones, total, err := s.Repo.ListMilestonesByProjectID(dbCtx, s.DB, projectID, organizationID, q)
 	if err != nil {
 		return nil, pagination.Meta{}, err
 	}
@@ -307,12 +307,12 @@ func (s *Service) ListMilestonesByProjectID(ctx context.Context, projectID uuid.
 	return milestones, pagination.NewMeta(q, total), nil
 }
 
-// GetMilestoneByID gets a milestone by ID
-func (s *Service) GetMilestoneByID(ctx context.Context, milestoneID uuid.UUID) (*Milestone, error) {
+// GetMilestoneByID gets a milestone by ID, scoped to the actor's organization.
+func (s *Service) GetMilestoneByID(ctx context.Context, organizationID uuid.UUID, milestoneID uuid.UUID) (*Milestone, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	return s.Repo.GetMilestoneByID(dbCtx, s.DB, milestoneID)
+	return s.Repo.GetMilestoneByIDAndOrganizationID(dbCtx, milestoneID, organizationID)
 }
 
 // Update updates a milestone's metadata (title, description, due date and/or
@@ -396,7 +396,7 @@ func (s *Service) UpdateMilestone(ctx context.Context, orgID uuid.UUID, userID u
 	}
 
 	if updated == nil {
-		return s.GetMilestoneByID(ctx, milestoneID)
+		return s.GetMilestoneByID(ctx, orgID, milestoneID)
 	}
 
 	return updated, nil

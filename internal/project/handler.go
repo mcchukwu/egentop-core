@@ -89,7 +89,13 @@ func (h *Handler) GetProjectByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.Service.GetByID(r.Context(), projectID)
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	project, err := h.Service.GetByID(r.Context(), orgID, projectID)
 	if err != nil {
 		response.HandleError(w, err)
 		return
@@ -196,9 +202,15 @@ func (h *Handler) ListMilestonesByProjectID(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
 	q := pagination.Parse(r.URL.Query().Get("page"), r.URL.Query().Get("limit"))
 
-	milestones, meta, err := h.Service.ListMilestonesByProjectID(r.Context(), projectID, q)
+	milestones, meta, err := h.Service.ListMilestonesByProjectID(r.Context(), orgID, projectID, q)
 	if err != nil {
 		response.HandleError(w, err)
 		return
@@ -221,7 +233,13 @@ func (h *Handler) GetMilestoneByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	milestone, err := h.Service.GetMilestoneByID(r.Context(), milestoneID)
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	milestone, err := h.Service.GetMilestoneByID(r.Context(), orgID, milestoneID)
 	if err != nil {
 		response.HandleError(w, err)
 		return
