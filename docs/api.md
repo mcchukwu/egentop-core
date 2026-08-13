@@ -105,8 +105,9 @@ Readiness. Pings the database.
 ## Authentication
 
 ### POST /v1/auth/register
-Creates a new user account. Sets the `refresh_token` cookie and returns an
-access token.
+Creates a new user account. Also creates a default organization named
+`<first_name>'s Organization` and makes the new user its `owner`. Sets the
+`refresh_token` cookie and returns an access token.
 
 Request body:
 

@@ -16,7 +16,7 @@ import (
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/audit"
 	"github.com/mcchukwu/egentop/internal/jwt"
-	"github.com/mcchukwu/egentop/internal/membership"
+	"github.com/mcchukwu/egentop/internal/organization"
 	"github.com/mcchukwu/egentop/pkg/config"
 	"github.com/mcchukwu/egentop/pkg/db"
 	"golang.org/x/crypto/bcrypt"
@@ -83,31 +83,9 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (string, st
 			return apperrors.ErrDatabase
 		}
 
-		// Create organization
-		// TODO: Create random default slug upon organization creation
-		var orgID uuid.UUID
-
-		err = tx.QueryRowContext(dbCtx, `
-		INSERT INTO organizations (name)
-		VALUES ($1)
-		RETURNING id
-	`, fmt.Sprintf("%s's Organization", req.FirstName)).Scan(&orgID)
-		if err != nil {
-			return apperrors.ErrDatabase
-		}
-
-		// Create membership (owner)
-		ownerRoleID, err := membership.ResolveSystemRoleID(dbCtx, tx, membership.RoleOwner)
-		if err != nil {
+		// Create default organization (slug + owner membership + audit included)
+		if _, err := organization.CreateTx(dbCtx, tx, fmt.Sprintf("%s's Organization", req.FirstName), userID, s.audit); err != nil {
 			return err
-		}
-
-		_, err = tx.ExecContext(dbCtx, `
-		INSERT INTO memberships (user_id, organization_id, role_id, status)
-		VALUES ($1, $2, $3, $4)
-	`, userID, orgID, ownerRoleID, membership.MembershipStatusActive)
-		if err != nil {
-			return apperrors.ErrDatabase
 		}
 
 		// Create session (auto-login)

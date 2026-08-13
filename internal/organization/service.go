@@ -34,97 +34,114 @@ func (s *Service) Create(ctx context.Context, name string, ownerID uuid.UUID) (u
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
+	var orgID uuid.UUID
+
+	err := db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
+		var err error
+		orgID, err = CreateTx(dbCtx, tx, name, ownerID, s.audit)
+		return err
+	})
+
+	return orgID, err
+}
+
+// CreateTx creates an organization, its owner membership, and the
+// organization.created audit entry inside the caller's transaction. It is
+// the single source of truth for org creation, shared by Service.Create and
+// auth.Service.Register.
+//
+// The slug is derived from name with a bounded retry loop: the first attempt
+// uses the plain slug; on a unique violation the slug is retried with a
+// random suffix. Each attempt runs behind a savepoint so a slug collision
+// does not abort the surrounding transaction. When all attempts are
+// exhausted, ErrOrganizationSlugExists is returned.
+func CreateTx(ctx context.Context, tx *sql.Tx, name string, ownerID uuid.UUID, auditSvc *audit.Service) (uuid.UUID, error) {
 	if name == "" {
 		return uuid.Nil, apperrors.ErrOrganizationNameInvalid
 	}
 
-	//TODO: Generate unique organization slug upon creation attempt
 	const maxSlugAttempts = 5
 	var orgID uuid.UUID
 
-	err := db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
-		// Create organization and return orgID
-		for i := 0; i < maxSlugAttempts; i++ {
-			var generatedSlug string
+	// Create organization and return orgID
+	for i := 0; i < maxSlugAttempts; i++ {
+		var generatedSlug string
 
-			if i == 0 {
-				generatedSlug = slug.Generate(name)
-			} else {
-				var err error
-				generatedSlug, err = slug.GenerateWithSuffix(name)
-				if err != nil {
-					return err
-				}
-			}
-
-			// Each insert attempt runs behind a savepoint so a unique
-			// violation on the slug does not abort the whole transaction.
-			spName := fmt.Sprintf("org_slug_%d", i)
-			if _, err := tx.ExecContext(dbCtx, `SAVEPOINT `+spName); err != nil {
-				return apperrors.ErrDatabase
-			}
-
-			err := tx.QueryRowContext(dbCtx, `
-			INSERT INTO organizations (name, slug, status, created_at, updated_at)
-			VALUES ($1, $2, $3, NOW(), NOW())
-			RETURNING id
-			`, name, string(generatedSlug), OrganizationStatusActive).Scan(&orgID)
+		if i == 0 {
+			generatedSlug = slug.Generate(name)
+		} else {
+			var err error
+			generatedSlug, err = slug.GenerateWithSuffix(name)
 			if err != nil {
-				// Roll back to the savepoint, discarding the failed insert.
-				if _, rbErr := tx.ExecContext(dbCtx, `ROLLBACK TO SAVEPOINT `+spName); rbErr != nil {
-					return apperrors.ErrDatabase
-				}
+				return uuid.Nil, err
+			}
+		}
 
-				// Slug collision: retry with a suffix.
-				if db.IsUniqueConstraintViolation(err, slugConstraint) {
-					continue
-				}
+		// Each insert attempt runs behind a savepoint so a unique
+		// violation on the slug does not abort the whole transaction.
+		spName := fmt.Sprintf("org_slug_%d", i)
+		if _, err := tx.ExecContext(ctx, `SAVEPOINT `+spName); err != nil {
+			return uuid.Nil, apperrors.ErrDatabase
+		}
 
-				return apperrors.ErrDatabase
+		err := tx.QueryRowContext(ctx, `
+		INSERT INTO organizations (name, slug, status, created_at, updated_at)
+		VALUES ($1, $2, $3, NOW(), NOW())
+		RETURNING id
+		`, name, string(generatedSlug), OrganizationStatusActive).Scan(&orgID)
+		if err != nil {
+			// Roll back to the savepoint, discarding the failed insert.
+			if _, rbErr := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT `+spName); rbErr != nil {
+				return uuid.Nil, apperrors.ErrDatabase
 			}
 
-			// Insert succeeded; orgID is set.
-			if _, err := tx.ExecContext(dbCtx, `RELEASE SAVEPOINT `+spName); err != nil {
-				return apperrors.ErrDatabase
+			// Slug collision: retry with a suffix.
+			if db.IsUniqueConstraintViolation(err, slugConstraint) {
+				continue
 			}
-			break
+
+			return uuid.Nil, apperrors.ErrDatabase
 		}
 
-		if orgID == uuid.Nil {
-			return apperrors.ErrOrganizationSlugExists
+		// Insert succeeded; orgID is set.
+		if _, err := tx.ExecContext(ctx, `RELEASE SAVEPOINT `+spName); err != nil {
+			return uuid.Nil, apperrors.ErrDatabase
 		}
+		break
+	}
 
-		// Create owner membership
-		ownerRoleID, err := membership.ResolveSystemRoleID(dbCtx, tx, membership.RoleOwner)
-		if err != nil {
-			return err
-		}
+	if orgID == uuid.Nil {
+		return uuid.Nil, apperrors.ErrOrganizationSlugExists
+	}
 
-		_, err = tx.ExecContext(dbCtx, `
-		INSERT INTO memberships (user_id, organization_id, role_id, status)
-		VALUES ($1, $2, $3, $4)
-		`, ownerID, orgID, ownerRoleID, membership.MembershipStatusActive)
-		if err != nil {
-			return apperrors.ErrDatabase
-		}
+	// Create owner membership
+	ownerRoleID, err := membership.ResolveSystemRoleID(ctx, tx, membership.RoleOwner)
+	if err != nil {
+		return uuid.Nil, err
+	}
 
-		// Audit Log
-		err = s.audit.Log(dbCtx, tx, audit.LogEntry{
-			OrganizationID: &orgID,
-			UserID:         &ownerID,
-			Action:         "organization.created",
-			EntityType:     "organization",
-			EntityID:       &orgID,
-			Metadata:       map[string]any{},
-		})
-		if err != nil {
-			return err
-		}
+	_, err = tx.ExecContext(ctx, `
+	INSERT INTO memberships (user_id, organization_id, role_id, status)
+	VALUES ($1, $2, $3, $4)
+	`, ownerID, orgID, ownerRoleID, membership.MembershipStatusActive)
+	if err != nil {
+		return uuid.Nil, apperrors.ErrDatabase
+	}
 
-		return nil
+	// Audit Log
+	err = auditSvc.Log(ctx, tx, audit.LogEntry{
+		OrganizationID: &orgID,
+		UserID:         &ownerID,
+		Action:         "organization.created",
+		EntityType:     "organization",
+		EntityID:       &orgID,
+		Metadata:       map[string]any{},
 	})
+	if err != nil {
+		return uuid.Nil, err
+	}
 
-	return orgID, err
+	return orgID, nil
 }
 
 // List returns all organizations an active user belongs to

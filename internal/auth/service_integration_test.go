@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -387,5 +388,94 @@ func TestAuthAuditRowsWrittenWithoutOrg(t *testing.T) {
 	// user.registered, user.logged_in, token.refreshed, user.logged_out
 	if orglessCount != 4 {
 		t.Fatalf("expected 4 org-less audit rows, got %d", orglessCount)
+	}
+}
+
+func TestRegisterCreatesDefaultOrgWithSlug(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	email := "reg-slug-" + uuid.NewString() + "@example.com"
+	register(t, svc, email)
+
+	var userID uuid.UUID
+	if err := db.QueryRowContext(ctx, `SELECT id FROM users WHERE email = $1`, email).Scan(&userID); err != nil {
+		t.Fatalf("find user: %v", err)
+	}
+
+	var orgID uuid.UUID
+	var orgName, slug string
+	if err := db.QueryRowContext(ctx, `
+		SELECT o.id, o.name, o.slug
+		FROM organizations o
+		JOIN memberships m ON m.organization_id = o.id
+		WHERE m.user_id = $1
+	`, userID).Scan(&orgID, &orgName, &slug); err != nil {
+		t.Fatalf("find default org: %v", err)
+	}
+
+	if orgName != "John's Organization" {
+		t.Fatalf("expected default org name %q, got %q", "John's Organization", orgName)
+	}
+	if slug == "" {
+		t.Fatal("expected default org to have a non-empty slug")
+	}
+	if !regexp.MustCompile(`^[a-z0-9-]+$`).MatchString(slug) {
+		t.Fatalf("slug must match ^[a-z0-9-]+$, got %q", slug)
+	}
+
+	// registration records an organization.created audit row scoped to the org
+	var auditCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*) FROM audit_logs
+		WHERE action = 'organization.created' AND organization_id = $1 AND user_id = $2
+	`, orgID, userID).Scan(&auditCount); err != nil {
+		t.Fatalf("count audit rows: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("expected 1 organization.created audit row, got %d", auditCount)
+	}
+}
+
+func TestRegisterSameFirstNameProducesDistinctSlugs(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	email1 := "reg-slug1-" + uuid.NewString() + "@example.com"
+	email2 := "reg-slug2-" + uuid.NewString() + "@example.com"
+
+	register(t, svc, email1)
+	register(t, svc, email2)
+
+	slugFor := func(email string) string {
+		var s string
+		if err := db.QueryRowContext(ctx, `
+			SELECT o.slug
+			FROM organizations o
+			JOIN memberships m ON m.organization_id = o.id
+			JOIN users u ON u.id = m.user_id
+			WHERE u.email = $1
+		`, email).Scan(&s); err != nil {
+			t.Fatalf("find org slug: %v", err)
+		}
+		return s
+	}
+
+	slug1, slug2 := slugFor(email1), slugFor(email2)
+
+	if slug1 == "" || slug2 == "" {
+		t.Fatalf("expected non-empty slugs, got %q and %q", slug1, slug2)
+	}
+	if slug1 == slug2 {
+		t.Fatalf("expected distinct slugs for the same first name, both %q", slug1)
+	}
+	if !regexp.MustCompile(`^[a-z0-9-]+$`).MatchString(slug1) || !regexp.MustCompile(`^[a-z0-9-]+$`).MatchString(slug2) {
+		t.Fatalf("slugs must match ^[a-z0-9-]+$, got %q and %q", slug1, slug2)
 	}
 }
