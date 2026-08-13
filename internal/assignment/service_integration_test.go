@@ -12,6 +12,7 @@ import (
 	"github.com/mcchukwu/egentop/internal/activity"
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/audit"
+	"github.com/mcchukwu/egentop/internal/project"
 	"github.com/mcchukwu/egentop/pkg/pagination"
 )
 
@@ -37,7 +38,8 @@ func integrationDB(t *testing.T) *sql.DB {
 
 func newTestService(db *sql.DB) *Service {
 	activityService := activity.NewService(activity.NewRepository(db))
-	return NewService(db, NewRepository(db), audit.NewService(db), activityService)
+	projectService := project.NewService(db, project.NewRepository(db), audit.NewService(db), activityService)
+	return NewService(db, NewRepository(db), projectService, audit.NewService(db), activityService)
 }
 
 type seededOrg struct {
@@ -196,12 +198,9 @@ func TestAssignmentListUpdateDelete(t *testing.T) {
 
 	// cross-org list returns no assignments
 	other := seedOrg(t, db, uuid.NewString())
-	crossOrg, _, err := svc.ListByProjectID(ctx, other.OrgID, s.ProjectID, pagination.Query{Page: 1, Limit: 20})
-	if err != nil {
-		t.Fatalf("cross-org ListByProjectID: %v", err)
-	}
-	if len(crossOrg) != 0 {
-		t.Fatalf("expected no cross-org assignments, got %d", len(crossOrg))
+	_, _, err = svc.ListByProjectID(ctx, other.OrgID, s.ProjectID, pagination.Query{Page: 1, Limit: 20})
+	if !errors.Is(err, apperrors.ErrProjectNotFound) {
+		t.Fatalf("expected ErrProjectNotFound for cross-org list, got %v", err)
 	}
 
 	// reassign to the owner
@@ -227,6 +226,35 @@ func TestAssignmentListUpdateDelete(t *testing.T) {
 	_, err = svc.GetByID(ctx, s.OrgID, s.ProjectID, assignment.ID)
 	if !errors.Is(err, apperrors.ErrAssignmentNotFound) {
 		t.Fatalf("expected ErrAssignmentNotFound after delete, got %v", err)
+	}
+}
+
+func TestAssignmentListValidEmptyParentAndRejectsMissingParent(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+	s := seedOrg(t, db, uuid.NewString())
+	emptyProjectID, _ := seedAdditionalAssignmentProject(t, db, s.OrgID, s.UserID)
+	if _, err := db.ExecContext(ctx, `DELETE FROM milestones WHERE project_id = $1`, emptyProjectID); err != nil {
+		t.Fatalf("remove empty project's milestone: %v", err)
+	}
+
+	assignments, meta, err := svc.ListByProjectID(ctx, s.OrgID, emptyProjectID, pagination.Query{Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("list assignments for valid empty project: %v", err)
+	}
+	if len(assignments) != 0 || meta.Total != 0 {
+		t.Fatalf("expected empty assignment list, got %d (total %d)", len(assignments), meta.Total)
+	}
+
+	if _, _, err := svc.ListByProjectID(ctx, s.OrgID, uuid.New(), pagination.Query{Page: 1, Limit: 20}); !errors.Is(err, apperrors.ErrProjectNotFound) {
+		t.Fatalf("expected ErrProjectNotFound for missing project, got %v", err)
+	}
+	other := seedOrg(t, db, uuid.NewString())
+	if _, _, err := svc.ListByProjectID(ctx, s.OrgID, other.ProjectID, pagination.Query{Page: 1, Limit: 20}); !errors.Is(err, apperrors.ErrProjectNotFound) {
+		t.Fatalf("expected ErrProjectNotFound for cross-org project, got %v", err)
 	}
 }
 

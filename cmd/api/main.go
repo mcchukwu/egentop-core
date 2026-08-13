@@ -87,7 +87,7 @@ func main() {
 	projectHandler := project.NewHandler(projectService)
 
 	assignmentRepo := assignment.NewRepository(db.DB)
-	assignmentService := assignment.NewService(db.DB, assignmentRepo, auditService, activityService)
+	assignmentService := assignment.NewService(db.DB, assignmentRepo, projectService, auditService, activityService)
 	assignmentHandler := assignment.NewHandler(assignmentService)
 
 	userRepo := user.NewRepository(db.DB)

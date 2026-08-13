@@ -20,6 +20,12 @@ type Service struct {
 	ActivityService *activity.Service
 }
 
+// Lookup exposes the narrow project lookup needed by other services without
+// coupling them to the project repository.
+type Lookup interface {
+	GetByID(ctx context.Context, organizationID uuid.UUID, projectID uuid.UUID) (*Project, error)
+}
+
 func NewService(db *sql.DB, repo *Repository, auditService *audit.Service, activityService *activity.Service) *Service {
 	return &Service{
 		DB:              db,
@@ -131,7 +137,7 @@ func (s *Service) Update(ctx context.Context, userID uuid.UUID, organizationID u
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		// Verify the project belongs to the actor organization
-		project, err := s.ensureProjectAccess(dbCtx, projectID, organizationID)
+		project, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, organizationID)
 		if err != nil {
 			return err
 		}
@@ -170,7 +176,7 @@ func (s *Service) Update(ctx context.Context, userID uuid.UUID, organizationID u
 			dueDate = req.DueDate
 		}
 
-		if err := s.Repo.UpdateDetails(dbCtx, tx, projectID, name, description, priority, status, dueDate); err != nil {
+		if err := s.Repo.UpdateDetails(dbCtx, tx, projectID, organizationID, name, description, priority, status, dueDate); err != nil {
 			return err
 		}
 
@@ -298,6 +304,10 @@ func (s *Service) CreateMilestone(ctx context.Context, organizationID uuid.UUID,
 func (s *Service) ListMilestonesByProjectID(ctx context.Context, organizationID uuid.UUID, projectID uuid.UUID, q pagination.Query) ([]Milestone, pagination.Meta, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
+
+	if _, err := s.ensureProjectAccess(dbCtx, projectID, organizationID); err != nil {
+		return nil, pagination.Meta{}, err
+	}
 
 	milestones, total, err := s.Repo.ListMilestonesByProjectID(dbCtx, s.DB, projectID, organizationID, q)
 	if err != nil {

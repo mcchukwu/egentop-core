@@ -174,6 +174,30 @@ func TestUpdateProjectStatusTransition(t *testing.T) {
 	}
 }
 
+func TestUpdateProjectRejectsCrossOrganizationProject(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	ownerID, ownerOrgID, projectID, _ := seedProject(t, db)
+	_, otherOrgID, _, _ := seedProject(t, db)
+
+	_, err := svc.Update(ctx, ownerID, otherOrgID, projectID, UpdateProjectRequest{Name: "Should Not Update"})
+	if !errors.Is(err, apperrors.ErrProjectNotFound) {
+		t.Fatalf("expected ErrProjectNotFound for cross-org update, got %v", err)
+	}
+
+	unchanged, err := svc.GetByID(ctx, ownerOrgID, projectID)
+	if err != nil {
+		t.Fatalf("read project after rejected update: %v", err)
+	}
+	if unchanged.Name != "Project" {
+		t.Fatalf("cross-org update changed project name to %q", unchanged.Name)
+	}
+}
+
 func TestUpdateMilestoneMetadata(t *testing.T) {
 	db := integrationDB(t)
 	defer db.Close()
@@ -236,12 +260,37 @@ func TestProjectReadsScopedToOrg(t *testing.T) {
 	if !errors.Is(err, apperrors.ErrMilestoneNotFound) {
 		t.Fatalf("expected ErrMilestoneNotFound for cross-org GetMilestoneByID, got %v", err)
 	}
-	crossMilestones, crossMeta, err := svc.ListMilestonesByProjectID(ctx, orgBID, projectAID, pagination.Query{Page: 1, Limit: 20})
-	if err != nil {
-		t.Fatalf("cross-org ListMilestonesByProjectID: %v", err)
+	_, _, err = svc.ListMilestonesByProjectID(ctx, orgBID, projectAID, pagination.Query{Page: 1, Limit: 20})
+	if !errors.Is(err, apperrors.ErrProjectNotFound) {
+		t.Fatalf("expected ErrProjectNotFound for cross-org milestone list, got %v", err)
 	}
-	if len(crossMilestones) != 0 || crossMeta.Total != 0 {
-		t.Fatalf("expected no cross-org milestones, got %d (total %d)", len(crossMilestones), crossMeta.Total)
+}
+
+func TestMilestoneListValidEmptyParent(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+	ownerID, orgID, _, _ := seedProject(t, db)
+	emptyProjectID := seedEmptyProject(t, db, orgID, ownerID)
+
+	milestones, meta, err := svc.ListMilestonesByProjectID(ctx, orgID, emptyProjectID, pagination.Query{Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("list milestones for valid empty project: %v", err)
+	}
+	if len(milestones) != 0 || meta.Total != 0 {
+		t.Fatalf("expected empty milestone list, got %d (total %d)", len(milestones), meta.Total)
+	}
+
+	_, missingOrgID, _, _ := seedProject(t, db)
+	_, _, err = svc.ListMilestonesByProjectID(ctx, missingOrgID, emptyProjectID, pagination.Query{Page: 1, Limit: 20})
+	if !errors.Is(err, apperrors.ErrProjectNotFound) {
+		t.Fatalf("expected ErrProjectNotFound for cross-org milestone list, got %v", err)
+	}
+	_, _, err = svc.ListMilestonesByProjectID(ctx, orgID, uuid.New(), pagination.Query{Page: 1, Limit: 20})
+	if !errors.Is(err, apperrors.ErrProjectNotFound) {
+		t.Fatalf("expected ErrProjectNotFound for missing project milestone list, got %v", err)
 	}
 }
 
@@ -277,4 +326,16 @@ func TestMilestoneNestedParentScope(t *testing.T) {
 	if updated.Title != "Updated Correctly" {
 		t.Fatalf("same-project milestone title = %q", updated.Title)
 	}
+}
+
+func seedEmptyProject(t *testing.T, db *sql.DB, orgID, ownerID uuid.UUID) uuid.UUID {
+	t.Helper()
+	var projectID uuid.UUID
+	if err := db.QueryRowContext(context.Background(), `
+		INSERT INTO projects (organization_id, created_by, name, status)
+		VALUES ($1, $2, $3, 'active') RETURNING id
+	`, orgID, ownerID, "Empty Project "+uuid.NewString()).Scan(&projectID); err != nil {
+		t.Fatalf("insert empty project: %v", err)
+	}
+	return projectID
 }

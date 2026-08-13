@@ -9,7 +9,10 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/mcchukwu/egentop/internal/activity"
+	"github.com/mcchukwu/egentop/internal/audit"
 	"github.com/mcchukwu/egentop/internal/middleware"
+	"github.com/mcchukwu/egentop/internal/project"
 	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/validation"
 )
@@ -34,7 +37,14 @@ func assignmentHandler(db *sql.DB, service *Service) http.Handler {
 	mux.Handle("GET /v1/orgs/{orgID}/projects/{projectID}/assignments/{assignmentID}", org.LoadOrg(access.RequireMembership(rbac.RequirePermission("assignment.view")(http.HandlerFunc(h.GetByID)))))
 	mux.Handle("PATCH /v1/orgs/{orgID}/projects/{projectID}/assignments/{assignmentID}", org.LoadOrg(access.RequireMembership(rbac.RequirePermission("assignment.update")(http.HandlerFunc(h.Update)))))
 	mux.Handle("DELETE /v1/orgs/{orgID}/projects/{projectID}/assignments/{assignmentID}", org.LoadOrg(access.RequireMembership(rbac.RequirePermission("assignment.remove")(http.HandlerFunc(h.Delete)))))
+	mux.Handle("GET /v1/orgs/{orgID}/projects/{projectID}/assignments", org.LoadOrg(access.RequireMembership(rbac.RequirePermission("assignment.list")(http.HandlerFunc(h.ListByProjectID)))))
 	return mux
+}
+
+func newAssignmentHTTPService(db *sql.DB) *Service {
+	activityService := activity.NewService(activity.NewRepository(db))
+	projectService := project.NewService(db, project.NewRepository(db), audit.NewService(db), activityService)
+	return NewService(db, NewRepository(db), projectService, audit.NewService(db), activityService)
 }
 
 func doAssignmentRequest(t *testing.T, handler http.Handler, method, path string, userID uuid.UUID, body []byte) *httptest.ResponseRecorder {
@@ -150,5 +160,54 @@ func TestAssignmentCreateHTTPRejectsInvalidReferencesWithoutRows(t *testing.T) {
 				t.Fatalf("expected no assignment rows, got %d", count)
 			}
 		})
+	}
+}
+
+func TestAssignmentListHTTPRejectsMissingOrCrossOrgProject(t *testing.T) {
+	validation.Init()
+	db := integrationDB(t)
+	defer db.Close()
+
+	s := seedOrg(t, db, uuid.NewString())
+	other := seedOrg(t, db, uuid.NewString())
+	handler := assignmentHandler(db, newAssignmentHTTPService(db))
+
+	for _, tc := range []struct {
+		name      string
+		orgID     uuid.UUID
+		projectID uuid.UUID
+	}{
+		{name: "missing project", orgID: s.OrgID, projectID: uuid.New()},
+		{name: "cross-org project", orgID: s.OrgID, projectID: other.ProjectID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := "/v1/orgs/" + tc.orgID.String() + "/projects/" + tc.projectID.String() + "/assignments"
+			rr := doAssignmentRequest(t, handler, http.MethodGet, path, s.UserID, nil)
+			if rr.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+			}
+			if got := decodeAssignmentHTTPError(t, rr).Error.Code; got != "project_not_found" {
+				t.Fatalf("error code = %q, want project_not_found", got)
+			}
+		})
+	}
+}
+
+func TestAssignmentListHTTPAllowsValidEmptyProject(t *testing.T) {
+	validation.Init()
+	db := integrationDB(t)
+	defer db.Close()
+
+	s := seedOrg(t, db, uuid.NewString())
+	emptyProjectID, milestoneID := seedAdditionalAssignmentProject(t, db, s.OrgID, s.UserID)
+	if _, err := db.ExecContext(t.Context(), `DELETE FROM milestones WHERE id = $1`, milestoneID); err != nil {
+		t.Fatalf("remove empty project's milestone: %v", err)
+	}
+
+	handler := assignmentHandler(db, newAssignmentHTTPService(db))
+	path := "/v1/orgs/" + s.OrgID.String() + "/projects/" + emptyProjectID.String() + "/assignments"
+	rr := doAssignmentRequest(t, handler, http.MethodGet, path, s.UserID, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
 }

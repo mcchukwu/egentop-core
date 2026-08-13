@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/mcchukwu/egentop/internal/activity"
 	"github.com/mcchukwu/egentop/internal/audit"
+	"github.com/mcchukwu/egentop/internal/project"
 	"github.com/mcchukwu/egentop/pkg/db"
 	"github.com/mcchukwu/egentop/pkg/pagination"
 )
@@ -14,14 +15,16 @@ import (
 type Service struct {
 	DB              *sql.DB
 	Repo            *Repository
+	ProjectLookup   project.Lookup
 	AuditServie     *audit.Service
 	ActivityService *activity.Service
 }
 
-func NewService(db *sql.DB, repo *Repository, auditService *audit.Service, activityService *activity.Service) *Service {
+func NewService(db *sql.DB, repo *Repository, projectLookup project.Lookup, auditService *audit.Service, activityService *activity.Service) *Service {
 	return &Service{
 		DB:              db,
 		Repo:            repo,
+		ProjectLookup:   projectLookup,
 		AuditServie:     auditService,
 		ActivityService: activityService,
 	}
@@ -111,6 +114,10 @@ func (s *Service) GetByID(ctx context.Context, orgID uuid.UUID, projectID uuid.U
 func (s *Service) ListByProjectID(ctx context.Context, orgID uuid.UUID, projectID uuid.UUID, q pagination.Query) ([]Assignment, pagination.Meta, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
+
+	if _, err := s.ProjectLookup.GetByID(dbCtx, orgID, projectID); err != nil {
+		return nil, pagination.Meta{}, err
+	}
 
 	assignments, total, err := s.Repo.ListByProjectID(dbCtx, orgID, projectID, q)
 	if err != nil {

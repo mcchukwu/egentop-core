@@ -95,20 +95,21 @@ func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID uu
 
 // UpdateDetails updates a project's metadata (name, description, priority,
 // due date and/or status). Nil fields are left unchanged.
-func (r *Repository) UpdateDetails(ctx context.Context, tx *sql.Tx, projectID uuid.UUID, name *string, description *string, priority *ProjectPriority, status *ProjectStatus, dueDate *time.Time) error {
+func (r *Repository) UpdateDetails(ctx context.Context, tx *sql.Tx, projectID uuid.UUID, organizationID uuid.UUID, name *string, description *string, priority *ProjectPriority, status *ProjectStatus, dueDate *time.Time) error {
 	query := `
 		UPDATE projects
 		SET
-			name = COALESCE($2, name),
-			description = COALESCE($3, description),
-			priority = COALESCE($4, priority),
-			status = COALESCE($5, status),
-			due_date = COALESCE($6, due_date),
+			name = COALESCE($3, name),
+			description = COALESCE($4, description),
+			priority = COALESCE($5, priority),
+			status = COALESCE($6, status),
+			due_date = COALESCE($7, due_date),
 			updated_at = NOW()
 		WHERE id = $1
+		AND organization_id = $2
 	`
 
-	result, err := tx.ExecContext(ctx, query, projectID, name, description, priority, status, dueDate)
+	result, err := tx.ExecContext(ctx, query, projectID, organizationID, name, description, priority, status, dueDate)
 	if err != nil {
 		return err
 	}
@@ -271,6 +272,40 @@ func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projec
 	project := &Project{}
 
 	err := r.DB.QueryRowContext(ctx, query, projectID, organizationID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.CreatedAt, &project.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, apperrors.ErrProjectNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return project, nil
+}
+
+// GetProjectByIDAndOrganizationIDForUpdate gets an organization-scoped
+// project and locks it for the duration of the transaction.
+func (r *Repository) GetProjectByIDAndOrganizationIDForUpdate(ctx context.Context, tx *sql.Tx, projectID uuid.UUID, organizationID uuid.UUID) (*Project, error) {
+	query := `
+		SELECT
+			id,
+			organization_id,
+			name,
+			description,
+			status,
+			priority,
+			created_by,
+			due_date,
+			created_at,
+			updated_at
+		FROM projects
+		WHERE id = $1
+		AND organization_id = $2
+		FOR UPDATE
+	`
+
+	project := &Project{}
+
+	err := tx.QueryRowContext(ctx, query, projectID, organizationID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.CreatedAt, &project.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, apperrors.ErrProjectNotFound
 	}
