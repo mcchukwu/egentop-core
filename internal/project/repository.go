@@ -272,7 +272,8 @@ func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projec
 			due_date,
 			client_id,
 			created_at,
-			updated_at
+			updated_at,
+			revision_limit
 		FROM projects
 		WHERE id = $1
 		AND organization_id = $2
@@ -280,7 +281,7 @@ func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projec
 
 	project := &Project{}
 
-	err := r.DB.QueryRowContext(ctx, query, projectID, organizationID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.ClientID, &project.CreatedAt, &project.UpdatedAt)
+	err := r.DB.QueryRowContext(ctx, query, projectID, organizationID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.ClientID, &project.CreatedAt, &project.UpdatedAt, &project.RevisionLimit)
 	if err == sql.ErrNoRows {
 		return nil, apperrors.ErrProjectNotFound
 	}
@@ -306,7 +307,8 @@ func (r *Repository) GetProjectByIDAndOrganizationIDForUpdate(ctx context.Contex
 			due_date,
 			client_id,
 			created_at,
-			updated_at
+			updated_at,
+			revision_limit
 		FROM projects
 		WHERE id = $1
 		AND organization_id = $2
@@ -315,7 +317,7 @@ func (r *Repository) GetProjectByIDAndOrganizationIDForUpdate(ctx context.Contex
 
 	project := &Project{}
 
-	err := tx.QueryRowContext(ctx, query, projectID, organizationID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.ClientID, &project.CreatedAt, &project.UpdatedAt)
+	err := tx.QueryRowContext(ctx, query, projectID, organizationID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.ClientID, &project.CreatedAt, &project.UpdatedAt, &project.RevisionLimit)
 	if err == sql.ErrNoRows {
 		return nil, apperrors.ErrProjectNotFound
 	}
@@ -500,6 +502,59 @@ func (r *Repository) SetMilestonePaymentStatus(ctx context.Context, tx *sql.Tx, 
 		AND organization_id = $4
 		AND payment_status = $5
 	`, next, milestoneID, projectID, organizationID, current)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return apperrors.ErrMilestoneNotFound
+	}
+
+	return nil
+}
+
+// SetProjectRevisionLimit sets (or clears, when limit is nil) the project-level
+// revision limit, scoped to the organization. The caller holds the project row
+// FOR UPDATE.
+func (r *Repository) SetProjectRevisionLimit(ctx context.Context, tx *sql.Tx, projectID uuid.UUID, organizationID uuid.UUID, limit *int) error {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE projects
+		SET revision_limit = $1,
+		    updated_at = NOW()
+		WHERE id = $2
+		AND organization_id = $3
+	`, limit, projectID, organizationID)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return apperrors.ErrProjectNotFound
+	}
+
+	return nil
+}
+
+// SetMilestoneRevisionLimit sets (or clears, when limit is nil) the
+// per-milestone revision-limit override, scoped to the project and
+// organization. The caller holds the milestone row FOR UPDATE.
+func (r *Repository) SetMilestoneRevisionLimit(ctx context.Context, tx *sql.Tx, milestoneID uuid.UUID, projectID uuid.UUID, organizationID uuid.UUID, limit *int) error {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE milestones
+		SET revision_limit = $1,
+		    updated_at = NOW()
+		WHERE id = $2
+		AND project_id = $3
+		AND organization_id = $4
+	`, limit, milestoneID, projectID, organizationID)
 	if err != nil {
 		return err
 	}

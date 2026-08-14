@@ -133,6 +133,37 @@ func seedMustChangeUser(t *testing.T, db *sql.DB) string {
 	return token
 }
 
+// seedAuthedUser creates a normal user (must_change_password=false) with a
+// valid active session, returning the signed access token. Used to reach
+// handlers past the auth + password gate.
+func seedAuthedUser(t *testing.T, db *sql.DB) string {
+	t.Helper()
+
+	var userID, sessionID uuid.UUID
+	if err := db.QueryRowContext(context.Background(), `
+		INSERT INTO users (email, password_hash, first_name, last_name, must_change_password)
+		VALUES ($1, 'hash', 'Authed', 'User', FALSE)
+		RETURNING id
+	`, "authed-"+uuid.NewString()+"@example.com").Scan(&userID); err != nil {
+		t.Fatalf("insert authed user: %v", err)
+	}
+
+	if err := db.QueryRowContext(context.Background(), `
+		INSERT INTO sessions (user_id, token_family_id, refresh_token_hash, token_lookup_hash, expires_at)
+		VALUES ($1, gen_random_uuid(), $2, $3, NOW() + interval '1 hour')
+		RETURNING id
+	`, userID, "hash-"+uuid.NewString(), "lookup-"+uuid.NewString()).Scan(&sessionID); err != nil {
+		t.Fatalf("insert authed session: %v", err)
+	}
+
+	token, err := jwt.NewManager(routesTestSecret, 15*time.Minute).GenerateAccessToken(userID, sessionID)
+	if err != nil {
+		t.Fatalf("sign access token: %v", err)
+	}
+
+	return token
+}
+
 // concretePath substitutes placeholder UUIDs into a route pattern so it can be
 // served. The password gate fires before any path parsing, so placeholder
 // values are sufficient for gated routes.
@@ -206,5 +237,69 @@ func TestPasswordGateCoversEveryProtectedRoute(t *testing.T) {
 	}
 	if ungated != 1 {
 		t.Fatalf("expected exactly one ungated protected route (POST /v1/me/password), got %d", ungated)
+	}
+}
+
+// TestMalformedJSONBodyReturns400: a malformed request body must map to
+// 400 invalid_request_body (not a 500) — regression for the missing
+// ErrInvalidRequestBody mapper case.
+func TestMalformedJSONBodyReturns400(t *testing.T) {
+	validation.Init()
+	db := routesIntegrationDB(t)
+	defer db.Close()
+
+	deps := testRouteDeps(t, db)
+	mux := http.NewServeMux()
+	registerRoutes(mux, deps)
+
+	token := seedAuthedUser(t, db)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/orgs", strings.NewReader(`{"name": `))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("malformed body status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	var env struct {
+		Error *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil || env.Error == nil || env.Error.Code != "invalid_request_body" {
+		t.Fatalf("malformed body error = %s, want code invalid_request_body", rr.Body.String())
+	}
+}
+
+// TestInvalidOrgIDReturns400: a non-UUID orgID in the path must map to
+// 400 invalid_organization_id (not a 500) — regression for the missing
+// ErrOrganizationIDInvalid mapper case.
+func TestInvalidOrgIDReturns400(t *testing.T) {
+	validation.Init()
+	db := routesIntegrationDB(t)
+	defer db.Close()
+
+	deps := testRouteDeps(t, db)
+	mux := http.NewServeMux()
+	registerRoutes(mux, deps)
+
+	token := seedAuthedUser(t, db)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/orgs/not-a-uuid/members", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("invalid orgID status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	var env struct {
+		Error *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil || env.Error == nil || env.Error.Code != "invalid_organization_id" {
+		t.Fatalf("invalid orgID error = %s, want code invalid_organization_id", rr.Body.String())
 	}
 }

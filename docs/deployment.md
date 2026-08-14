@@ -64,16 +64,15 @@ list of variables the application reads** (verified against
 | `JWT_ACCESS_TTL` | e.g. `15m` |
 | `JWT_REFRESH_TTL` | e.g. `720h` |
 | `CORS_ALLOWED_ORIGINS` | The **real** client origin(s), comma-separated, no wildcards |
+| `LOG_LEVEL` | `info` (default) — one of `debug`, `info`, `warn`, `error`; controls log verbosity |
 
 Template: [`deploy/env/egentop.env.example`](../deploy/env/egentop.env.example)
 — install to `/etc/egentop/egentop.env` (root:egentop, mode 0640).
 
 > **Documented but NOT read by the running app** (config surface verified
-> 2026-08-14): `LOG_LEVEL`, `APP_NAME`, `DB_HOST`/`DB_PORT`/`DB_NAME`/
-> `DB_USER`/`DB_PASSWORD`/`DB_SSLMODE` (Makefile-only), and
-> `RATE_LIMIT_REQUESTS`/`RATE_LIMIT_WINDOW` (dead config, security-review
-> LOW-2). Do not expect these to change behavior. If the team wants
-> `LOG_LEVEL` or configurable rate limits, that is a Builder-batch code item.
+> 2026-08-14): `APP_NAME` and `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/
+> `DB_PASSWORD`/`DB_SSLMODE` (Makefile-only; the app reads `DB_URL` only).
+> Do not expect these to change behavior.
 
 ### Secrets
 

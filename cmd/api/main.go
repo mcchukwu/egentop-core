@@ -28,6 +28,7 @@ import (
 
 func main() {
 	cfg := config.Load()
+	logger.SetLevel(cfg.LogLevel)
 
 	if err := cfg.Validate(); err != nil {
 		logger.Error(err.Error())
@@ -64,6 +65,7 @@ func main() {
 	securityHeadersMiddleware := middleware.NewSecurityHeadersMiddleware()
 	corsMiddleware := middleware.NewCorsMiddleware(cfg.CORSAllowedOrigins)
 	recoveryMiddleware := middleware.NewRecoveryMiddleware()
+	bodyLimitMiddleware := middleware.NewBodyLimitMiddleware()
 
 	// Configure repositories, services and handlers
 	auditService := audit.NewService(db.DB)
@@ -121,7 +123,7 @@ func main() {
 	})
 
 	// chain middleware
-	handlerChain := recoveryMiddleware.Recover((requestIDMiddleware.Assign(loggingMiddleware.Log(securityHeadersMiddleware.Secure(corsMiddleware.Cors(rateLimiterMiddleware.Limit(mux)))))))
+	handlerChain := recoveryMiddleware.Recover((requestIDMiddleware.Assign(bodyLimitMiddleware.Limit(loggingMiddleware.Log(securityHeadersMiddleware.Secure(corsMiddleware.Cors(rateLimiterMiddleware.Limit(mux))))))))
 
 	server := &http.Server{
 		Addr:         ":" + cfg.AppPort,

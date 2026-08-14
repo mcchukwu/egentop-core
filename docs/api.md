@@ -158,7 +158,12 @@ Response `200`:
 }
 ```
 
-Errors: `400` `validation_error`, `401` `invalid_credentials`, `403` `forbidden`.
+Every failed login is indistinguishable: an unknown identifier, a suspended
+account, and a wrong password all return `401 invalid_credentials` (no account
+enumeration via login; registration keeps its own `409` responses by accepted
+trade-off).
+
+Errors: `400` `validation_error`, `401` `invalid_credentials`.
 
 ### POST /v1/auth/refresh
 Rotates the refresh token from the `refresh_token` cookie and returns a new
@@ -548,6 +553,28 @@ Response `200`:
 
 Errors: `404` `client_not_found`.
 
+### DELETE /v1/orgs/{orgID}/clients/{userID}
+Removes a provisioned-but-unassigned client's membership from the
+organization. Permission: `client.provision`.
+
+The target must hold an active `client` membership in the organization (else
+`404 client_not_found`). Behavior:
+
+- The **membership** row is deleted; the `users` row is never deleted.
+- The removal is rejected with `409 client_attached_to_project` when the
+  client is still the assigned client of any project in the organization —
+  unassign those projects first (`PUT .../projects/{projectID}/client` with
+  `null`).
+- The membership row is locked `FOR UPDATE` during the check so a concurrent
+  project assignment cannot race the removal (the assignment either commits
+  first and blocks the removal with 409, or the removal commits first and the
+  assignment aborts with `404 client_not_found`).
+
+Response `200` (`data: null`).
+
+Errors: `403` `forbidden` (actor lacks `client.provision`), `404`
+`client_not_found`, `409` `client_attached_to_project`.
+
 ---
 
 ## Projects
@@ -650,6 +677,30 @@ Response `200` with the updated project.
 
 Errors: `400` `validation_error`, `404` `project_not_found` /
 `client_not_found`.
+
+### PATCH /v1/orgs/{orgID}/projects/{projectID}/revision-limit
+Sets or clears the project-level revision limit (the default every milestone
+falls back to). Permission: `project.update` (owner, admin). Agency-only —
+the limit fields never appear on client-facing surfaces.
+
+Request body:
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `revision_limit` | integer or `null` | optional; `null`/absent = unlimited, must be ≥ 1 when set |
+
+The effective limit per milestone is computed at read time
+(`COALESCE(milestone.revision_limit, project.revision_limit)`), so setting or
+clearing this value immediately affects every milestone of the project that
+has no per-milestone override. The change is audited
+(`project.revision_limit_changed`, before/after) and written to the activity
+feed.
+
+Response `200` with the updated project (the project payload itself never
+exposes `revision_limit`).
+
+Errors: `400` `validation_error` (including `revision_limit` < 1),
+`404` `project_not_found`.
 
 ---
 
@@ -895,6 +946,27 @@ Response `200` with the updated milestone.
 
 Errors: `400` `validation_error`, `404` `milestone_not_found`.
 
+### PATCH /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/revision-limit
+Sets or clears the per-milestone revision-limit override. Permission:
+`milestone.update` (owner, admin). Agency-only — the limit fields never appear
+on client-facing surfaces.
+
+Request body:
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `revision_limit` | integer or `null` | optional; `null`/absent clears the override (falls back to the project default), must be ≥ 1 when set |
+
+The response carries the resulting **effective** limit (milestone override,
+else project default, else `null` = unlimited) re-read inside the same
+transaction. The change is audited (`milestone.revision_limit_changed`,
+before/after) and written to the activity feed.
+
+Response `200` with the updated milestone.
+
+Errors: `400` `validation_error` (including `revision_limit` < 1),
+`404` `milestone_not_found` / `project_not_found`.
+
 ---
 
 ## Approval View
@@ -1059,10 +1131,11 @@ Errors: `404` `project_not_found` (client actor outside their project).
 Activity `type` values include: `project.created`, `project.archived`,
 `project.completed`, `project.status_changed`, `project.updated`,
 `project.client_assigned`, `project.client_removed`,
+`project.revision_limit_changed`,
 `milestone.created`, `milestone.started`, `milestone.completed`,
 `milestone.cancelled`, `milestone.status_changed`, `milestone.updated`,
 `milestone.submitted`, `milestone.approved`, `milestone.changes_requested`,
-`milestone.payment_status_changed`,
+`milestone.payment_status_changed`, `milestone.revision_limit_changed`,
 `deliverable.submitted`, `deliverable.removed`,
 `client.provisioned`, `client.credential_rotated`,
 `assignment.created`, `assignment.updated`, `assignment.removed`.
@@ -1126,12 +1199,16 @@ service layer.
 | HTTP | Code | Meaning |
 |------|------|---------|
 | 400 | `validation_error` | Request validation failed; `fields` carries details |
+| 400 | `invalid_request_body` | Request body could not be decoded |
+| 400 | `invalid_organization_id` | `orgID` path parameter is not a UUID |
+| 400 | `invalid_identifier` | Email/phone identifier is invalid |
+| 400 | `invalid_project_priority` | Project priority is invalid |
 | 400 | `invalid_status_transition` | Status change is not allowed |
 | 400 | `invalid_due_date` | Due date is invalid |
 | 400 | `weak_password` | Password is too weak |
 | 400 | `project_has_no_client` | Project has no client; submit-for-approval is unavailable |
 | 400 | `deliverable_required` | At least one deliverable is required before submission |
-| 401 | `invalid_credentials` | Email/phone or password is wrong |
+| 401 | `invalid_credentials` | Failed login (unknown identifier, suspended account, or wrong password) |
 | 401 | `invalid_password` | Current password is wrong |
 | 401 | `unauthorized` | Missing or invalid access token |
 | 401 | `invalid_token` | Refresh token invalid or expired |
@@ -1148,6 +1225,7 @@ service layer.
 | 404 | `assignment_not_found` | Assignment does not exist or is outside the org |
 | 404 | `client_not_found` | User is not an active client of the org |
 | 404 | `deliverable_not_found` | Deliverable does not exist or is outside the milestone |
+| 405 | `method_not_allowed` | HTTP method not allowed for the resource |
 | 409 | `user_not_found` | User does not exist |
 | 409 | `email_already_exists` | Email is already registered |
 | 409 | `phone_already_exists` | Phone is already registered |
@@ -1156,6 +1234,7 @@ service layer.
 | 409 | `invitation_pending` | Invitation is already pending for this user |
 | 409 | `milestone_not_awaiting_approval` | Milestone is not in `awaiting_approval` state |
 | 409 | `client_attached_to_project` | Client membership is attached to a project; unassign instead |
+| 413 | `payload_too_large` | Request body exceeds the 1MB limit |
 | 429 | `rate_limited` | Too many requests |
 | 500 | `internal_server_error` | Unexpected server error |
 | 503 | `service_unavailable` | Database unavailable (readiness probe) |

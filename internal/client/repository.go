@@ -224,3 +224,62 @@ func (r *Repository) RevokeAllSessions(ctx context.Context, tx *sql.Tx, userID u
 	}
 	return nil
 }
+
+// LockClientMembership locks the user's membership row in the organization for
+// the duration of the transaction, serializing the removal against concurrent
+// role updates/removals. ErrClientNotFound when no row exists (the target
+// stopped being a member between resolution and removal).
+func (r *Repository) LockClientMembership(ctx context.Context, q Queryer, orgID uuid.UUID, userID uuid.UUID) (uuid.UUID, error) {
+	var membershipID uuid.UUID
+	err := q.QueryRowContext(ctx, `
+		SELECT id
+		FROM memberships
+		WHERE organization_id = $1
+		AND user_id = $2
+		FOR UPDATE
+	`, orgID, userID).Scan(&membershipID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return uuid.Nil, apperrors.ErrClientNotFound
+		}
+		return uuid.Nil, apperrors.ErrDatabase
+	}
+	return membershipID, nil
+}
+
+// ClientHasProjects reports whether the user is the assigned client of any
+// project in the organization. A client attached to a project cannot be
+// removed directly (the project reference would be stranded).
+func (r *Repository) ClientHasProjects(ctx context.Context, q Queryer, orgID uuid.UUID, userID uuid.UUID) (bool, error) {
+	var exists bool
+	err := q.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM projects
+			WHERE organization_id = $1
+			AND client_id = $2
+		)
+	`, orgID, userID).Scan(&exists)
+	if err != nil {
+		return false, apperrors.ErrDatabase
+	}
+	return exists, nil
+}
+
+// DeleteClientMembership deletes the user's membership row in the organization
+// (never the users row) and returns the deleted membership id.
+func (r *Repository) DeleteClientMembership(ctx context.Context, tx *sql.Tx, orgID uuid.UUID, userID uuid.UUID) (uuid.UUID, error) {
+	var membershipID uuid.UUID
+	err := tx.QueryRowContext(ctx, `
+		DELETE FROM memberships
+		WHERE organization_id = $1
+		AND user_id = $2
+		RETURNING id
+	`, orgID, userID).Scan(&membershipID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return uuid.Nil, apperrors.ErrClientNotFound
+		}
+		return uuid.Nil, apperrors.ErrDatabase
+	}
+	return membershipID, nil
+}

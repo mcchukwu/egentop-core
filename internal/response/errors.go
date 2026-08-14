@@ -97,6 +97,10 @@ func HandleError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusNotFound, "organization_not_found", "organization not found")
 	case errors.Is(err, apperrors.ErrOrganizationSuspended):
 		Error(w, http.StatusForbidden, "organization_suspended", "organization suspended")
+	case errors.Is(err, apperrors.ErrOrganizationIDInvalid):
+		Error(w, http.StatusBadRequest, "invalid_organization_id", "organization id is invalid")
+	case errors.Is(err, apperrors.ErrOrganizationSlugExists):
+		Error(w, http.StatusConflict, "organization_slug_exists", "organization slug already exists")
 
 	// MEMBERSHIPS
 	case errors.Is(err, apperrors.ErrMembershipNotFound):
@@ -133,10 +137,20 @@ func HandleError(w http.ResponseWriter, err error) {
 	// VALIDATION
 	case errors.Is(err, apperrors.ErrValidation):
 		Error(w, http.StatusBadRequest, "validation_error", "validation failed")
+	case errors.Is(err, apperrors.ErrInvalidRequestBody):
+		Error(w, http.StatusBadRequest, "invalid_request_body", "request body is invalid")
+	case errors.Is(err, apperrors.ErrUserIdentifierInvalid):
+		Error(w, http.StatusBadRequest, "invalid_identifier", "phone or email is invalid")
+	case errors.Is(err, apperrors.ErrInvalidProjectPriority):
+		Error(w, http.StatusBadRequest, "invalid_project_priority", "invalid project priority")
 
 	// RATE LIMIT
 	case errors.Is(err, apperrors.ErrRateLimited):
 		Error(w, http.StatusTooManyRequests, "rate_limited", "too many requests")
+
+	// METHOD / SYSTEM
+	case errors.Is(err, apperrors.ErrMethodNotAllowed):
+		Error(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 
 	// DEFAULT
 	default:

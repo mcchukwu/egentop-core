@@ -126,9 +126,41 @@ func TestLoginValidatesPassword(t *testing.T) {
 		t.Fatalf("login: %v", err)
 	}
 
+	// Wrong password and unknown identifier are indistinguishable: both
+	// collapse into invalid_credentials (no account enumeration via login).
 	_, _, err = svc.Login(ctx, LoginRequest{Identifier: email, Password: "wrong-password"})
-	if !errors.Is(err, apperrors.ErrInvalidPassword) {
-		t.Fatalf("expected ErrInvalidPassword, got %v", err)
+	if !errors.Is(err, apperrors.ErrInvalidCredentials) {
+		t.Fatalf("expected ErrInvalidCredentials for wrong password, got %v", err)
+	}
+
+	_, _, err = svc.Login(ctx, LoginRequest{Identifier: "unknown-" + uuid.NewString() + "@example.com", Password: "password123"})
+	if !errors.Is(err, apperrors.ErrInvalidCredentials) {
+		t.Fatalf("expected ErrInvalidCredentials for unknown identifier, got %v", err)
+	}
+}
+
+// TestLoginRejectsSuspendedAsInvalidCredentials: a non-active user must get
+// the same invalid_credentials error as an unknown identifier / wrong
+// password, so a failed login never reveals account state.
+func TestLoginRejectsSuspendedAsInvalidCredentials(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	email := "suspended-" + uuid.NewString() + "@example.com"
+	register(t, svc, email)
+
+	if _, err := db.ExecContext(ctx, `
+		UPDATE users SET status = 'suspended' WHERE email = $1
+	`, email); err != nil {
+		t.Fatalf("suspend user: %v", err)
+	}
+
+	_, _, err := svc.Login(ctx, LoginRequest{Identifier: email, Password: "password123"})
+	if !errors.Is(err, apperrors.ErrInvalidCredentials) {
+		t.Fatalf("expected ErrInvalidCredentials for suspended user, got %v", err)
 	}
 }
 

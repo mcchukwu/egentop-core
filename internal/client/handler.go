@@ -122,3 +122,32 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	response.Success(w, http.StatusOK, "clients fetched", pagination.NewResponse(clients, q, meta.Total))
 }
+
+// Remove removes a provisioned-but-unassigned client's membership -
+// DELETE /orgs/{orgID}/clients/{userID}
+func (h *Handler) Remove(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	targetUserID, err := uuid.Parse(r.PathValue("userID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrClientNotFound)
+		return
+	}
+
+	if err := h.Service.Remove(r.Context(), userID, orgID, targetUserID); err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "client removed", nil)
+}

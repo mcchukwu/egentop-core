@@ -1105,6 +1105,126 @@ func (s *Service) UpdateMilestonePaymentStatus(ctx context.Context, userID uuid.
 	return result, nil
 }
 
+// SetProjectRevisionLimit sets (or clears, when limit is nil) the project-level
+// revision limit. The project row is locked FOR UPDATE, the column is updated,
+// and the change is audited + written to the activity feed. The effective
+// limit is computed at read time (COALESCE(milestone, project)); nothing else
+// changes.
+func (s *Service) SetProjectRevisionLimit(ctx context.Context, userID uuid.UUID, organizationID uuid.UUID, projectID uuid.UUID, limit *int) (*Project, error) {
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
+
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		project, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, organizationID)
+		if err != nil {
+			return err
+		}
+
+		if err := s.Repo.SetProjectRevisionLimit(dbCtx, tx, projectID, organizationID, limit); err != nil {
+			return err
+		}
+
+		if err := s.AuditService.Log(dbCtx, tx, audit.LogEntry{
+			OrganizationID: &organizationID,
+			UserID:         &userID,
+			Action:         "project.revision_limit_changed",
+			EntityType:     "project",
+			EntityID:       &projectID,
+			Metadata: audit.VersionedMetadata(
+				map[string]any{"revision_limit": project.RevisionLimit},
+				map[string]any{"revision_limit": limit},
+				"",
+			),
+		}); err != nil {
+			return err
+		}
+
+		if err := s.ActivityService.Log(dbCtx, tx, activity.NewActivity(
+			organizationID, userID, &projectID, nil,
+			activity.ActivityProjectRevisionLimitChanged, "Project revision limit changed",
+			map[string]any{"project_id": &projectID, "revision_limit": limit},
+		)); err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return s.GetByID(ctx, organizationID, projectID)
+}
+
+// SetMilestoneRevisionLimit sets (or clears, when limit is nil) the
+// per-milestone revision-limit override. The project and milestone rows are
+// locked FOR UPDATE, the column is updated, and the change is audited +
+// written to the activity feed. The response carries the resulting effective
+// limit (milestone override, else project default) re-read inside the
+// transaction.
+func (s *Service) SetMilestoneRevisionLimit(ctx context.Context, userID uuid.UUID, organizationID uuid.UUID, projectID uuid.UUID, milestoneID uuid.UUID, limit *int) (*Milestone, error) {
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
+
+	var result *Milestone
+
+	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		// Lock the project row first so the limit change serializes against
+		// project-level state mutations (archive, assign, metadata updates).
+		if _, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, organizationID); err != nil {
+			return err
+		}
+
+		milestone, err := s.Repo.GetMilestoneByIDAndProjectIDAndOrganizationIDForUpdate(dbCtx, tx, milestoneID, projectID, organizationID)
+		if err != nil {
+			return err
+		}
+
+		if err := s.Repo.SetMilestoneRevisionLimit(dbCtx, tx, milestoneID, projectID, organizationID, limit); err != nil {
+			return err
+		}
+
+		// Re-read within the transaction so the audit and the response carry
+		// the actual effective limit (COALESCE(milestone, project)) — clearing
+		// the override falls back to the project default.
+		updated, err := s.Repo.GetMilestoneByIDAndProjectIDAndOrganizationIDForUpdate(dbCtx, tx, milestoneID, projectID, organizationID)
+		if err != nil {
+			return err
+		}
+
+		if err := s.AuditService.Log(dbCtx, tx, audit.LogEntry{
+			OrganizationID: &organizationID,
+			UserID:         &userID,
+			Action:         "milestone.revision_limit_changed",
+			EntityType:     "milestone",
+			EntityID:       &milestoneID,
+			Metadata: audit.VersionedMetadata(
+				map[string]any{"revision_limit": milestone.RevisionLimit},
+				map[string]any{"revision_limit": updated.RevisionLimit},
+				"",
+			),
+		}); err != nil {
+			return err
+		}
+
+		if err := s.ActivityService.Log(dbCtx, tx, activity.NewActivity(
+			organizationID, userID, &projectID, &milestoneID,
+			activity.ActivityMilestoneRevisionLimitChanged, "Milestone revision limit changed",
+			map[string]any{"project_id": &projectID, "milestone_id": &milestoneID, "revision_limit": updated.RevisionLimit},
+		)); err != nil {
+			return err
+		}
+
+		result = updated
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 // GetApprovalView builds the shared deep-link payload: the project plus every
 // milestone with deliverables and payment status. It is the WhatsApp landing
 // page for clients. Revision limit/limit_reached are deliberately excluded.

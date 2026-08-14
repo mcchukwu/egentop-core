@@ -656,6 +656,96 @@ func (h *Handler) UpdateMilestonePaymentStatus(w http.ResponseWriter, r *http.Re
 	response.Success(w, http.StatusOK, "milestone payment status updated", milestone)
 }
 
+// UpdateProjectRevisionLimit sets or clears the project-level revision limit -
+// PATCH /projects/{project_id}/revision-limit
+func (h *Handler) UpdateProjectRevisionLimit(w http.ResponseWriter, r *http.Request) {
+	var req UpdateRevisionLimitRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	if req.RevisionLimit != nil && *req.RevisionLimit < 1 {
+		response.ValidationError(w, map[string]string{"revision_limit": "must be null or at least 1"})
+		return
+	}
+
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	project, err := h.Service.SetProjectRevisionLimit(r.Context(), userID, orgID, projectID, req.RevisionLimit)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "project revision limit updated", project)
+}
+
+// UpdateMilestoneRevisionLimit sets or clears the per-milestone revision-limit
+// override - PATCH /projects/{project_id}/milestones/{milestone_id}/revision-limit
+func (h *Handler) UpdateMilestoneRevisionLimit(w http.ResponseWriter, r *http.Request) {
+	var req UpdateRevisionLimitRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	if req.RevisionLimit != nil && *req.RevisionLimit < 1 {
+		response.ValidationError(w, map[string]string{"revision_limit": "must be null or at least 1"})
+		return
+	}
+
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestoneID, err := uuid.Parse(r.PathValue("milestoneID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestone, err := h.Service.SetMilestoneRevisionLimit(r.Context(), userID, orgID, projectID, milestoneID, req.RevisionLimit)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "milestone revision limit updated", milestone)
+}
+
 // GetApprovalView returns the shared client-facing deep link payload -
 // GET /projects/{project_id}/approval
 func (h *Handler) GetApprovalView(w http.ResponseWriter, r *http.Request) {

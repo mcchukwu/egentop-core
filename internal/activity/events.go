@@ -25,4 +25,6 @@ const (
 	ActivityClientCredentialRotated       = "client.credential_rotated"
 	ActivityDeliverableSubmitted          = "deliverable.submitted"
 	ActivityDeliverableRemoved            = "deliverable.removed"
+	ActivityProjectRevisionLimitChanged   = "project.revision_limit_changed"
+	ActivityMilestoneRevisionLimitChanged = "milestone.revision_limit_changed"
 )

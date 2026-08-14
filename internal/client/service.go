@@ -240,6 +240,63 @@ func (s *Service) ResetCredential(ctx context.Context, actorID uuid.UUID, orgID 
 	return result, nil
 }
 
+// Remove deletes a provisioned-but-unassigned client's membership from the
+// organization. The user row is never deleted (only the membership). The
+// membership row is locked FOR UPDATE, then the project-attachment check runs
+// inside the same transaction:
+//
+//   - a concurrent AssignClient that commits first is visible to the project
+//     check -> 409 client_attached_to_project;
+//   - if this removal commits first, a concurrent assign's IsActiveClientMember
+//     check fails -> ErrClientNotFound -> the assign aborts.
+//
+// The lock ordering (membership row only) never conflicts with AssignClient's
+// project-row lock, so no deadlock is possible.
+func (s *Service) Remove(ctx context.Context, actorID uuid.UUID, orgID uuid.UUID, userID uuid.UUID) error {
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
+
+	return db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		// Resolve the target: an active client-role membership (else 404).
+		// Mirrors reset-credential semantics.
+		if _, err := s.Repo.GetClientUser(dbCtx, tx, orgID, userID); err != nil {
+			return err
+		}
+
+		// Serialize against concurrent role updates/removals.
+		if _, err := s.Repo.LockClientMembership(dbCtx, tx, orgID, userID); err != nil {
+			return err
+		}
+
+		// A client that holds any project in the org cannot be removed
+		// directly: unassign the project(s) first (PUT .../client with null).
+		hasProjects, err := s.Repo.ClientHasProjects(dbCtx, tx, orgID, userID)
+		if err != nil {
+			return err
+		}
+		if hasProjects {
+			return apperrors.ErrClientAttachedToProject
+		}
+
+		deletedID, err := s.Repo.DeleteClientMembership(dbCtx, tx, orgID, userID)
+		if err != nil {
+			return err
+		}
+
+		return s.AuditService.Log(dbCtx, tx, audit.LogEntry{
+			OrganizationID: &orgID,
+			UserID:         &actorID,
+			Action:         "membership.removed",
+			EntityType:     "membership",
+			EntityID:       &deletedID,
+			Metadata: map[string]any{
+				"removed_member_id": userID.String(),
+				"reason":            "client removed by agency",
+			},
+		})
+	})
+}
+
 // List returns the organization's clients (client-role memberships only),
 // newest first.
 func (s *Service) List(ctx context.Context, orgID uuid.UUID, q pagination.Query) ([]Client, pagination.Meta, error) {

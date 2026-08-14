@@ -81,6 +81,8 @@ func layer1HTTPHarness(t *testing.T, db *sql.DB) (http.Handler, *config.Config) 
 	mux.Handle("GET /v1/orgs/{orgID}/projects/{projectID}/approval", orgScoped("milestone.view", http.HandlerFunc(projectHandler.GetApprovalView)))
 	mux.Handle("GET /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}", orgScoped("milestone.view", http.HandlerFunc(projectHandler.GetMilestoneByID)))
 	mux.Handle("POST /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/changes-requested", orgScoped("milestone.revision.request", http.HandlerFunc(projectHandler.RequestMilestoneChanges)))
+	mux.Handle("PATCH /v1/orgs/{orgID}/projects/{projectID}/revision-limit", orgScoped("project.update", http.HandlerFunc(projectHandler.UpdateProjectRevisionLimit)))
+	mux.Handle("PATCH /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/revision-limit", orgScoped("milestone.update", http.HandlerFunc(projectHandler.UpdateMilestoneRevisionLimit)))
 	mux.Handle("PATCH /v1/orgs/{orgID}/members/{userID}", orgScoped("member.role.update", http.HandlerFunc(membershipHandler.UpdateOrgMemberRole)))
 	mux.Handle("DELETE /v1/orgs/{orgID}/members/{userID}", orgScoped("member.remove", http.HandlerFunc(membershipHandler.RemoveOrgMember)))
 

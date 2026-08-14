@@ -64,6 +64,14 @@ type UpdateMilestonePaymentStatusRequest struct {
 	Status MilestonePaymentStatus `json:"status" validate:"required,oneof=unpaid partial paid"`
 }
 
+// UpdateRevisionLimitRequest is the body of the agency-only revision-limit
+// PATCHes (project default + per-milestone override). A nil value (absent or
+// JSON null) clears the limit / override. Values below 1 are rejected with a
+// field validation error before reaching the DB CHECK constraint.
+type UpdateRevisionLimitRequest struct {
+	RevisionLimit *int `json:"revision_limit"`
+}
+
 // ClientMilestoneDetail is the milestone detail payload for client-role
 // actors. revision_count + payment_status + deliverables are visible (the
 // client approval surface), but the agency-facing revision limit and

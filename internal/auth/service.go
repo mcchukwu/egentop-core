@@ -144,8 +144,12 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (string, string, 
             `, req.Identifier).Scan(&userID, &passwordHash, &status)
 		}
 		if err != nil {
+			// Unknown identifier and inactive/suspended status both collapse
+			// into invalid_credentials so a failed login never reveals whether
+			// an account exists (anti-enumeration; registration keeps its own
+			// 409s by accepted trade-off).
 			if errors.Is(err, sql.ErrNoRows) {
-				return apperrors.ErrUserNotFound
+				return apperrors.ErrInvalidCredentials
 			}
 
 			return apperrors.ErrDatabase
@@ -153,13 +157,13 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (string, string, 
 
 		// Check if user is active
 		if status != "active" {
-			return apperrors.ErrUserSuspended
+			return apperrors.ErrInvalidCredentials
 		}
 
 		// Verify user password
 		err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password))
 		if err != nil {
-			return apperrors.ErrInvalidPassword
+			return apperrors.ErrInvalidCredentials
 		}
 
 		// Create session

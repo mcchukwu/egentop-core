@@ -23,6 +23,8 @@ type Config struct {
 	JWTRefreshTokenTTL time.Duration
 
 	CORSAllowedOrigins []string
+
+	LogLevel string
 }
 
 // Load loads the config from the environment
@@ -50,6 +52,7 @@ func Load() *Config {
 		JWTAccessTokenTTL:  accessTokenTTL,
 		JWTRefreshTokenTTL: refreshTokenTTL,
 		CORSAllowedOrigins: strings.Split(getEnv("CORS_ALLOWED_ORIGINS", ""), ","),
+		LogLevel:           getEnv("LOG_LEVEL", "info"),
 	}
 }
 

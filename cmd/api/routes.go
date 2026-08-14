@@ -94,6 +94,7 @@ func protectedRoutes(d routeDeps) []protectedRoute {
 		{method: "POST", pattern: "/v1/orgs/{orgID}/clients", handler: orgScoped("client.provision", http.HandlerFunc(d.h.client.Provision)), gated: true},
 		{method: "GET", pattern: "/v1/orgs/{orgID}/clients", handler: orgScoped("client.list", http.HandlerFunc(d.h.client.List)), gated: true},
 		{method: "POST", pattern: "/v1/orgs/{orgID}/clients/{userID}/reset-credential", handler: orgScoped("client.provision", http.HandlerFunc(d.h.client.ResetCredential)), gated: true},
+		{method: "DELETE", pattern: "/v1/orgs/{orgID}/clients/{userID}", handler: orgScoped("client.provision", http.HandlerFunc(d.h.client.Remove)), gated: true},
 
 		// Projects
 		{method: "POST", pattern: "/v1/orgs/{orgID}/projects", handler: orgScoped("project.create", http.HandlerFunc(d.h.project.Create)), gated: true},
@@ -120,6 +121,10 @@ func protectedRoutes(d routeDeps) []protectedRoute {
 
 		// Payment status
 		{method: "PATCH", pattern: "/v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/payment-status", handler: orgScoped("milestone.payment_status.update", http.HandlerFunc(d.h.project.UpdateMilestonePaymentStatus)), gated: true},
+
+		// Revision limits (agency-only setters)
+		{method: "PATCH", pattern: "/v1/orgs/{orgID}/projects/{projectID}/revision-limit", handler: orgScoped("project.update", http.HandlerFunc(d.h.project.UpdateProjectRevisionLimit)), gated: true},
+		{method: "PATCH", pattern: "/v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/revision-limit", handler: orgScoped("milestone.update", http.HandlerFunc(d.h.project.UpdateMilestoneRevisionLimit)), gated: true},
 
 		// Client-facing surface (approval deep link + project-scoped activity)
 		{method: "GET", pattern: "/v1/orgs/{orgID}/projects/{projectID}/approval", handler: orgScoped("milestone.view", http.HandlerFunc(d.h.project.GetApprovalView)), gated: true},
