@@ -13,9 +13,9 @@ Post-MVP backend → **API-first validation**. Layer-1 delta + **reliability pas
 
 ## Active Work
 
-- **Reliability pass: DONE** — security exposure review (no criticals); reliability batch (`b536853`: revision_limit setter, client removal endpoint, getClientIP hardening, error-mapper 400s, login 401 unification, 1MB body limit, LOG_LEVEL wiring); **race fix** (`9606e7b`, Database Specialist design — assign/remove serialized on the membership row; Tester-verified 134/134, Reviewer APPROVED); CI test gate shipped (`817c0c1`); deployment artifacts + runbook (`817c0c1`); docs verified against code + roadmap reconciled — Q9 RESOLVED (`f3d0230`).
-- **Validation readiness (NEXT):** founder picks provider/region (~$5–10/mo; London/Frankfurt recommended for WA latency) → DevOps stands up the instance per `docs/deployment.md` runbook + smoke checklist. API validation kit (wedge walkthrough, Postman collection, client deep-link demo) and Product validation protocol not yet built.
-- **Founder:** line up 1–2 friendly agencies to run the wedge.
+- **Frontend (M3) — APPROVED + initialized 2026-08-14** in a separate codebase at `/home/miracle/projects/egentop-frontend`: requirements, stack research, architecture, diagrams, `.captain/` memory all done + committed. Q5 ("API-first validation before any frontend") **superseded the same day** — the founder correctly identified agencies can't operate a raw API (see DECISIONS.md).
+- **Backend: complete and validation-ready** — no further backend engineering required before validation (134/134, CI-gated, race-free, reviewed).
+- **Awaiting founder sign-offs:** FE-O1 (domain/hosting: `app.egentop.com` + `api.egentop.com`), FE-O2 (~30-min backend change: `revision_limit` on project payloads), FE-O3 (scope exclusions).
 
 ## Current Priorities
 
@@ -28,8 +28,7 @@ Post-MVP backend → **API-first validation**. Layer-1 delta + **reliability pas
 ## Current Blockers
 
 - **None technical.** 134/134 tests, race-free, CI gated, review-approved.
-- Validation deployment awaits founder provider/region choice (~$5–10/mo class).
-- Agency recruitment is founder-side.
+- Founder sign-offs needed: FE-O1 (domain/hosting), FE-O2 (revision_limit backend change), FE-O3 (scope exclusions) — then the frontend build starts.
 
 ## Important Risks
 
@@ -52,10 +51,11 @@ Post-MVP backend → **API-first validation**. Layer-1 delta + **reliability pas
 
 ## Next Recommended Action
 
-Founder: choose the validation provider/region. Then DevOps stands up the instance per the runbook + smoke checklist, and the validation kit + protocol are built while agencies are recruited. No further backend engineering is required before validation.
+Founder signs off FE-O1/FE-O2/FE-O3 (frontend repo) → approve the small `revision_limit` backend change → start the frontend build session in `/home/miracle/projects/egentop-frontend` (scaffold + shared core → agency workspace → client page → deploy + CORS + smoke → real-device WhatsApp test) → run validation with 1–2 friendly agencies.
 
 ## Recent Changes
 
+- 2026-08-14: **Frontend approved + initialized** (`egentop-frontend`, commit `b458f07`) — requirements, research, architecture, diagrams, project memory. Q5 superseded (founder: agencies can't operate a raw API; interface is on the validation critical path). Backend DECISIONS/ROADMAP/OPEN_QUESTIONS updated.
 - 2026-08-14: **Reliability pass complete** — security review → reliability batch (`b536853`) → race fix (`9606e7b`, Tester-found, DB-specialist-designed, Reviewer-approved) → docs pass + Q9 resolved (`f3d0230`). 134/134 tests. CI gate + deployment artifacts (`817c0c1`).
 - 2026-08-14: Q5 resolved (API-first validation before frontend); Q6 resolved (founder daily availability); small follow-ups authorized; reliability mandate stated
 - 2026-08-14: Layer-1 delta committed (`3185247`) — client role, approval state machine, revisions, deliverables, payment status, AI-readiness fixes

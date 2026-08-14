@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-08-14 — Frontend approved: separate codebase, initialized; Q5's "API-first validation" superseded
+
+**Decision:** Build the minimal frontend NOW, in a separate codebase at `/home/miracle/projects/egentop-frontend` (initialized 2026-08-14: requirements, stack research, architecture, diagrams, `.captain/` memory — see that repo). This **supersedes Q5's "API-first validation before any frontend"**: the founder correctly identified that agencies cannot operate a raw API and the backend's client deep link returns JSON, not a rendered page — some interface is on the critical path to validation. The backend itself is unchanged and remains validation-ready.
+
+Locked choices (full detail in the frontend repo's `.captain/DECISIONS.md`): agency workspace = React 19+TS+Vite SPA; client page = vanilla-TS entry in the same Vite project; hosting = Cloudflare Pages (free, Lagos POP) at `app.egentop.com` + API on the VPS at `api.egentop.com` (same-site cross-origin — the backend `SameSite=Lax` refresh cookie works as-is; ops change: `CORS_ALLOWED_ORIGINS=https://app.egentop.com`). Completeness contract: 45/50 backend routes exercised from the UI (register + assignments added to scope; exclusions: 3 ops probes, logout-all, `PATCH /v1/me`).
+
+**Recommended backend change (pending founder approval, FE-O2 in the frontend repo):** return `revision_limit` on project payloads (~30 min) so the UI can display the project default without a workaround. Not required for the backend to be validation-ready.
+
+**Consequences:** Validation sequence becomes: (1) founder signs off FE-O1 (domain/hosting) + FE-O2 (revision_limit change) + FE-O3 (scope exclusions), (2) optional small backend change, (3) frontend build session in `egentop-frontend`, (4) deploy frontend next to the API + CORS env, (5) run validation with 1–2 friendly agencies.
+
+---
+
 ## 2026-08-14 — Reliability pass complete; race fix accepted; validation deployment next
 
 **Decision:** The reliability pass is complete and the backend is validation-ready: **134/134 tests pass, 0 failures**, CI gate live, Reviewer APPROVED. Decisions made within this pass:

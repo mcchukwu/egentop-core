@@ -19,7 +19,7 @@ Each layer unlocks the next. Escrow is a feature of Layer 3, not the product. AI
 
 - [x] **M1 — Backend MVP** (complete): auth, orgs, memberships, projects, milestones, assignments, activity, audit, RBAC
 - [~] **M2 — Layer-1 product delta**: approvals state machine, revisions, client role, deliverables, payment status — **backend complete + verified 2026-08-14** (93 integration tests). Remaining M2 scope: email delivery + invitation loop + password reset (wedge-independent, deferred past MVP per Q11a)
-- [ ] **M3 — Frontend**: minimal client-facing portal + agency workspace — **DEFERRED 2026-08-14 (Q5: API-first validation before any frontend)**; revisit when validation signals justify the build
+- [~] **M3 — Frontend**: minimal agency workspace + client approval page — **APPROVED 2026-08-14 (Q5 superseded)**, initialized in a separate codebase at `/home/miracle/projects/egentop-frontend` (requirements/research/architecture/diagrams done). Build is the next major work stream; deploy next to the API, then validation.
 - [ ] **M4 — Operations layer**: templates, automation, notifications, reporting
 - [ ] **M5 — Financial layer**: milestone invoicing → payment tracking → escrow/payouts
 - [ ] **M6 — Intelligence layer**: AI project manager, scope analyzer, meeting summarizer, approval assistant, risk detection, ops assistant
@@ -39,7 +39,7 @@ Each layer unlocks the next. Escrow is a feature of Layer 3, not the product. AI
 
 ## Medium-Term Work
 
-- [proposed] **Frontend** — timeboxed, hard-scoped: auth, orgs, projects, milestones, assignments, activity feed, one view; the client approval surface must be dead simple (client-facing). 8–12 weeks budgeted honestly. Decision pending (OPEN_QUESTIONS Q5: build vs agent-first validation).
+- [~] **Frontend (M3)** — APPROVED + initialized 2026-08-14 in `/home/miracle/projects/egentop-frontend`: React 19+TS+Vite agency SPA + vanilla-TS client approval page; Cloudflare Pages (free) at `app.egentop.com`; same-site cross-origin to `api.egentop.com`. Timeboxed, hard-scoped per docs/requirements.md; the client approval surface is dead-simple (the wedge). Build session next.
 - [proposed] **Templates & automation** — reusable project templates, auto-signoff, automatic reminders (Layer 2)
 - [proposed] **Invoicing + per-milestone payment tracking** — agency-facing, no client trust required (Layer 3 phase 1)
 

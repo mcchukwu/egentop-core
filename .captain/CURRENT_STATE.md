@@ -36,9 +36,9 @@
 
 ## Currently Being Worked On
 
-- **Validation readiness (NEXT)** — deployment provider/region choice (founder; ~$5–10/mo; London/Frankfurt recommended for WA latency); then DevOps stands up the validation instance per `docs/deployment.md` + smoke checklist (TLS, sanitized proxy, Secure cookies, fresh JWT secret, CORS, DB lockdown, retention cron). API validation kit (wedge walkthrough, Postman collection, client deep-link demo) + Product validation protocol (what to learn from 1–2 friendly agencies) not yet built.
-- **Founder:** line up 1–2 friendly agencies for the API-first validation run.
-- Not in progress: email delivery + invitation loop + password reset (deferred past MVP); frontend (deferred per Q5).
+- **Frontend (M3) — APPROVED + initialized 2026-08-14** in a separate codebase (`/home/miracle/projects/egentop-frontend`): requirements, stack research, architecture, diagrams, and `.captain/` memory are done and committed. Build session is next (this repo's backend is the API contract — unchanged).
+- **Awaiting founder sign-offs (frontend repo FE-O1/FE-O2/FE-O3):** domain/hosting plan (`app.egentop.com` + `api.egentop.com`), the ~30-min `revision_limit`-on-project-payload backend change, and scope exclusions.
+- **Not in progress:** email delivery + invitation loop + password reset (deferred past MVP); validation deployment of the backend alone is no longer the gating path — the frontend deploys alongside it.
 
 ## Partially Implemented
 
@@ -80,9 +80,9 @@ The structural-debt statement (2026-08-13 audit) is fully resolved, and the reli
 1. ~~**Founder decisions** — geography (Q1), wedge (Q2)~~ — **DONE 2026-08-14**
 2. ~~Fix tenant-isolation hole~~ — **DONE 2026-08-13**
 3. ~~**Layer-1 delta** — product requirements → architecture → migration → plan → build → test + review + security~~ — **DONE 2026-08-14** (backend complete; 93 integration tests; all verifier findings resolved)
-4. ~~**Q5/Q6 decisions** — API-first validation before frontend; founder available daily~~ — **DONE 2026-08-14**
+4. ~~**Q5/Q6 decisions** — API-first validation before frontend; founder available daily~~ — **DONE 2026-08-14; Q5 SUPERSEDED same day** (frontend approved — see DECISIONS.md)
 5. ~~**Small follow-ups + reliability pass** — revision_limit setter, client removal, security hardening, race fix, CI gate, deployment artifacts~~ — **DONE 2026-08-14** (commits `b536853`/`9606e7b`/`817c0c1`/`f3d0230`; 134/134 tests; Reviewer APPROVED)
-6. **Validation deployment (NEXT)** — founder picks provider/region (~$5–10/mo; London/Frankfurt recommended) → DevOps stands up the instance per `docs/deployment.md` runbook + smoke checklist (TLS, sanitized proxy, Secure cookies, fresh JWT secret, CORS, DB lockdown, authz_decisions cron)
-7. **Validation kit + protocol** — API validation kit (wedge walkthrough, Postman collection, client deep-link demo) + Product validation protocol (what to learn from 1–2 friendly agencies)
-8. **Founder: line up 1–2 friendly agencies** and run API-first validation; feed signals into pricing (Q4), distribution (Q3), and the frontend decision
+6. **Frontend sign-offs (founder):** FE-O1 domain/hosting (`app.egentop.com` + `api.egentop.com`), FE-O2 `revision_limit` backend change (~30 min), FE-O3 scope exclusions
+7. **Frontend build (NEXT, in `egentop-frontend`):** scaffold + shared core → agency workspace → client approval page → deploy to Cloudflare Pages + CORS env + smoke → real-device WhatsApp test
+8. **Validation run** with 1–2 friendly agencies; feed signals into pricing (Q4), distribution (Q3), and the product
 9. **Email delivery** (buy: Resend/SES/Postmark class) + invitation loop + password reset — wedge-independent, deferred past MVP

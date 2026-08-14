@@ -5,6 +5,21 @@
 
 ---
 
+## Q5 — Frontend decision — **SUPERSEDED 2026-08-14 (see DECISIONS.md)**
+
+- **Resolution (2026-08-14):** ~~API-first validation before any frontend~~ — **superseded the same day.** The founder identified that agencies cannot operate a raw API and the client deep link returns JSON, not a rendered page. The minimal frontend is now approved and initialized in a separate codebase (`/home/miracle/projects/egentop-frontend`). Frontend build is the next major work stream.
+
+---
+
+## FE-O2 — Backend change: `revision_limit` on project payloads (from the frontend repo)
+
+- **Question:** Approve returning `revision_limit` on project payloads (~30 min, Builder) so the frontend can display the project default without a workaround?
+- **Why it matters:** The frontend project detail screen shows the project revision limit; without the payload field, the UI must approximate via milestone `COALESCE` values + local state (can lie when no milestones exist).
+- **Current understanding:** Architect-recommended; frontend ships either way (contained fallback).
+- **Information needed:** Founder approval. See frontend repo `.captain/OPEN_QUESTIONS.md` FE-O2.
+
+---
+
 ## Q3 — Distribution channel
 
 - **Question:** How do the first agencies find Egentop?
