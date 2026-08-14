@@ -29,7 +29,9 @@
 
 ## Currently Being Worked On
 
-- **Nothing in implementation.** Layer-1 backend is complete and verified. Next candidates: docs nit (below), email delivery + invitation loop, frontend decision.
+- **Approved small follow-ups (2026-08-14):** `docs/deployment.md` rollback example fix (Documenter) — **DONE 2026-08-14** (rollback example now lists 000005→000001 down migrations in reverse order; uncommitted). `revision_limit` admin setter (Builder) and provisioned-but-unassigned client removal path (Builder) — **authorized, awaiting user invocation of Builder** (handoff context re-prepared on resume).
+- **Security validation-exposure review DONE (2026-08-14)** — analysis only, no code changed. No Critical/multi-tenant breach; tenant isolation, client project-scoping (404 no-existence-leak), one-time-credential gate, refresh rotation/family revocation all verified sound. Findings: **HIGH-1** rate limiter trusts `X-Forwarded-For` verbatim (bypass + memory DoS; fix = proxy overwrites/strips XFF + cheap code change to derive key from `X-Real-IP`/`RemoteAddr`, cap length); **MEDIUM-1** missing error-mapper cases return 500 for client-triggerable bad input; **MEDIUM-2** login/register account enumeration (login 409 user_not_found vs 401 invalid_password); **MEDIUM-3** no request-body size limit; **MEDIUM-4** org-existence oracle 403-vs-404 (accept for validation, revisit pre-launch); LOWs: HSTS includeSubDomains, dead `RATE_LIMIT_REQUESTS`/`RATE_LIMIT_WINDOW` config, unpopulated session IP/UA, pagination overflow. Exposure checklist (proxy+TLS, XFF sanitize, APP_ENV/cookies, JWT secret, CORS, DB lockdown, authz_decisions cron, smoke test) is the deploy gate. Sample nginx config in `docs/deployment.md` uses `$proxy_add_x_forwarded_for` — insufficient; must be fixed at deploy.
+- **Up next (reliability pass):** close test-coverage gaps (HTTP cross-org GET/PATCH, live concurrency-lock test); apply the cheap security fixes (HIGH-1 code half + MEDIUM-1/2/3 + LOW-2 config cleanup — recommended as a Builder batch); CI test gate decision pending founder re-review.
 
 ## Partially Implemented
 
@@ -39,7 +41,7 @@
 
 ## Known Problems
 
-- **`docs/deployment.md` rollback example is stale** — lists only 000003/000002/000001 down migrations; 000004/000005 down files now exist. (Flagged by Documenter 2026-08-14; one-line fix.)
+- **`docs/deployment.md` rollback example — FIXED 2026-08-14** — now lists all five down migrations in reverse order (000005→000001); uncommitted in working tree.
 - **`docs/roadmap.md` is legacy** — reflects the old generic-PM framing; conflicts with the four-layer vision; needs reconciliation (OPEN_QUESTIONS Q9); still contains a false "done" claim (milestone status update — the delta resolved the status path, but the file's framing is still stale).
 - **`project.status.update` permission is seeded but unused** — status changes flow through `PATCH /projects/{id}` with `project.update`; permission-to-route mismatch remains (pre-existing, minor).
 - **Provisioned-but-never-assigned clients cannot be removed** — `member.remove` rejects all client-role memberships (409), and unassign requires a project link; a client with no project has no API removal path. Operational note: such memberships persist in `client.list` until DB cleanup. (Tester-flagged 2026-08-14.)
@@ -70,7 +72,9 @@ The structural-debt statement (2026-08-13 audit) is now fully resolved: the tena
 1. ~~**Founder decisions** — geography (Q1), wedge (Q2)~~ — **DONE 2026-08-14**
 2. ~~Fix tenant-isolation hole~~ — **DONE 2026-08-13**
 3. ~~**Layer-1 delta** — product requirements → architecture → migration → plan → build → test + review + security~~ — **DONE 2026-08-14** (backend complete; 93 integration tests; all verifier findings resolved)
-4. **Get the Layer-1 backend in front of a real agency** — the wedge (milestone sign-off → revision limits → payment status) is built but unvalidated with users. Options: minimal client-facing frontend (WhatsApp deep-link flow) or API-first validation with one or two friendly agencies. Needs founder hours (Q6) and distribution answer (Q3).
-5. **Email delivery** (buy: Resend/SES/Postmark class) + close the staff invitation loop (accept/decline) + password reset — wedge-independent infrastructure, deferred past MVP per Q11a
-6. **Follow-ups**: `revision_limit` admin setter (small); `docs/deployment.md` rollback example fix (one line); provisioned-but-unassigned client removal path (operational)
-7. Minimal CI test gate (recommended by Architect + Captain; founder deferred — revisit at deploy)
+4. ~~**Q5/Q6 decisions** — API-first validation before frontend; founder available daily~~ — **DONE 2026-08-14**
+5. **Small follow-ups (IN PROGRESS)** — `revision_limit` admin setter; provisioned-but-unassigned client removal path; `docs/deployment.md` rollback example fix
+6. **Reliability pass** — close test-coverage gaps (HTTP cross-org GET/PATCH, live concurrency-lock test); security hardening for validation exposure (rate-limit/X-Forwarded-For when exposed); CI test gate decision (recommended: ship test gate before validation)
+7. **Validation readiness** — minimal deployment for the validation instance (DevOps; founder picks provider/budget); API validation kit (wedge walkthrough, Postman collection, client deep-link demo); Product validation protocol (what to learn from 1–2 friendly agencies)
+8. **Founder: line up 1–2 friendly agencies** and run API-first validation; feed signals into pricing (Q4), distribution (Q3), and the frontend decision
+9. **Email delivery** (buy: Resend/SES/Postmark class) + invitation loop + password reset — wedge-independent, deferred past MVP

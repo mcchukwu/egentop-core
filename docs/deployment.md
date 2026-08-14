@@ -41,10 +41,13 @@ Apply migrations before deploying a new binary, using the same ordered list:
 cat migrations/*.up.sql | psql "$DB_URL"
 ```
 
-For rollback:
+For rollback, apply the down migrations in reverse order. The example below
+rolls back all five migrations:
 
 ```bash
-cat migrations/000003_add_permissions.down.sql \
+cat migrations/000005_layer1_delta.down.sql \
+    migrations/000004_add_session_token_lookup_hash.down.sql \
+    migrations/000003_add_permissions.down.sql \
     migrations/000002_create_projects.down.sql \
     migrations/000001_init_schema.down.sql | psql "$DB_URL"
 ```

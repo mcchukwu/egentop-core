@@ -25,9 +25,10 @@
 
 ---
 
-## Q5 — Frontend decision
+## Q5 — Frontend decision — **RESOLVED 2026-08-14**
 
 - **Question:** Build a minimal frontend (timeboxed 8–12 weeks) or validate API-first with the agent angle?
+- **Resolution (2026-08-14):** **API-first validation before any frontend.** No frontend build now; validate the wedge with 1–2 friendly agencies over the API (client approval deep link + one-time credentials). Revisit frontend only when validation signals justify it.
 - **Why it matters:** Biggest time commitment on the horizon. For agencies, a client-facing approval portal is the actual product surface; agencies will tolerate rough internal tools but clients need dead-simple UX.
 - **Current understanding:** No frontend exists. The Captain and Architect both lean toward a hard-scoped minimal frontend after Layer-1 delta; agent-first validation was the alternative if founder hours are tight.
 - **Possible approaches:** (a) Minimal agency workspace + client approval portal; (b) agent-first API validation; (c) outsource frontend.
@@ -35,9 +36,10 @@
 
 ---
 
-## Q6 — Founder availability
+## Q6 — Founder availability — **RESOLVED 2026-08-14**
 
 - **Question:** How many hours per week can the founder actually spend?
+- **Resolution (2026-08-14):** Available every day, on-call via the Captain session. Engineering capacity is agent-assisted; founder hours go to agency contact and decisions.
 - **Why it matters:** Calibrates whether the 90-day plan is solo, solo + agent-assisted, or needs a hire/outsourcing.
 - **Current understanding:** Unknown.
 - **Information needed:** Founder statement.
@@ -103,3 +105,5 @@
 - **Q2 — Competitive wedge** — RESOLVED 2026-08-14: **Reframed wedge approved by founder.** Wedge = milestone-level sign-off → revision limits → invoicing → payment status for 2–20 person agencies, especially with African payment rails. Layer-1 is designed around this.
 - **Q12 — Revision-limit semantics** — RESOLVED 2026-08-14: **Track + flag, no hard cap.** `revision_count` + `milestone_revisions` history + configurable per-project/milestone limit; `limit_reached` flag surfaces over-revision to the agency without blocking the client approval path.
 - **Q13 — Payment status scope** — RESOLVED 2026-08-14: **Per-milestone status** (unpaid/partial/paid), agency-updated, display-only, no money movement; visible on the client approval view.
+- **Q5 — Frontend decision** — RESOLVED 2026-08-14: **API-first validation before any frontend**; frontend deferred until validation signals justify the build.
+- **Q6 — Founder availability** — RESOLVED 2026-08-14: available every day / on-call via the Captain session; engineering capacity is agent-assisted.

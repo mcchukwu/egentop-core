@@ -19,7 +19,7 @@ Each layer unlocks the next. Escrow is a feature of Layer 3, not the product. AI
 
 - [x] **M1 — Backend MVP** (complete): auth, orgs, memberships, projects, milestones, assignments, activity, audit, RBAC
 - [~] **M2 — Layer-1 product delta**: approvals state machine, revisions, client role, deliverables, payment status — **backend complete + verified 2026-08-14** (93 integration tests). Remaining M2 scope: email delivery + invitation loop + password reset (wedge-independent, deferred past MVP per Q11a)
-- [ ] **M3 — Frontend**: minimal client-facing portal + agency workspace (decision pending)
+- [ ] **M3 — Frontend**: minimal client-facing portal + agency workspace — **DEFERRED 2026-08-14 (Q5: API-first validation before any frontend)**; revisit when validation signals justify the build
 - [ ] **M4 — Operations layer**: templates, automation, notifications, reporting
 - [ ] **M5 — Financial layer**: milestone invoicing → payment tracking → escrow/payouts
 - [ ] **M6 — Intelligence layer**: AI project manager, scope analyzer, meeting summarizer, approval assistant, risk detection, ops assistant
@@ -34,7 +34,10 @@ Each layer unlocks the next. Escrow is a feature of Layer 3, not the product. AI
 - [proposed] **Email delivery** — buy (Resend/SES/Postmark class), one provider interface. Foundation for invites, reset, verification. Recommended; awaiting approval.
 - [proposed] **Close invitation loop** — accept/decline staff invitations; password reset. Client provisioning already works via one-time credentials (no email needed).
 - [proposed] **`revision_limit` admin setter** — schema + read-side wired; only the write endpoint is missing (small).
-- [proposed] **Frontend / real-agency validation** — the wedge is built but unvalidated with users. Options: minimal client-facing approval portal (WhatsApp deep-link flow) or API-first validation with friendly agencies. Needs founder hours (Q6) + distribution answer (Q3).
+- [x] **Validation-path decision** (done 2026-08-14) — API-first validation before any frontend (Q5); founder available daily (Q6)
+- [in progress] **Small engineering follow-ups** — `revision_limit` admin setter, provisioned-but-unassigned client removal path, `docs/deployment.md` rollback example fix
+- [proposed] **Reliability pass** — close test-coverage gaps (HTTP cross-org GET/PATCH, live concurrency-lock test); security hardening for validation exposure; CI test gate (recommended: ship before validation, pending founder re-review of the deploy-time deferral)
+- [proposed] **Validation readiness** — minimal deployment for the validation instance (DevOps); API validation kit (wedge walkthrough, Postman collection, client deep-link demo); Product validation protocol (what to learn from 1–2 friendly agencies)
 - [deferred → revisit at deploy] **Minimal CI test gate** — GitHub Actions + Postgres service container; founder deferred CI to deploy time; recommendation stands. Note: a CI gate must NOT run `-race` on the whole suite (pre-existing bcrypt-cost-12 timeout); scope `-race` to specific packages or lower bcrypt cost in tests.
 
 ## Medium-Term Work

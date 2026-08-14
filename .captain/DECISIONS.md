@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-08-14 — Validation path chosen: API-first; founder availability; follow-ups authorized
+
+**Decision:** Q5 RESOLVED — **API-first validation before any frontend.** Q6 RESOLVED — founder available daily/anytime (engineering capacity is agent-assisted; founder drives agency-facing contact). The backend is the core asset and **must be fully reliable before real agencies touch it** (reliability mandate). The three small engineering follow-ups are authorized: `revision_limit` admin setter, provisioned-but-unassigned client removal path, `docs/deployment.md` rollback example fix.
+
+**Context:** Founder decision session 2026-08-14. The wedge is built but unvalidated; the fastest credible validation is API-first with 1–2 friendly agencies using the existing client-approval deep link + one-time credentials (WhatsApp channel). Frontend (M3) is deferred until validation signals justify the build. The reliability mandate re-opens the CI/test-gate deferral for review (Captain recommends shipping the test gate earlier than deploy time).
+
+**Consequences:** Validation sequence = (1) small follow-ups [in progress], (2) reliability pass (close test-coverage gaps, security hardening), (3) minimal deployment for the validation instance (DevOps; provider/budget pending founder), (4) validation kit (API walkthrough, Postman collection, client deep-link demo) + Product validation protocol, (5) founder runs validation with 1–2 friendly agencies. Frontend build is off the near-term roadmap.
+
+---
+
 ## 2026-08-14 — Layer-1 delta built and verified; post-review fixes accepted
 
 **Decision:** The Layer-1 delta backend is complete, tested (93 integration tests + unit tests for pure logic), reviewed, and security-reviewed. The independent verification passes found 10 must-fix items; all were fixed and re-verified. Notable post-review fixes:
