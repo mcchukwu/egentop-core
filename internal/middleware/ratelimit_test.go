@@ -1,9 +1,12 @@
 package middleware
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestGetClientIPNeverTrustsXForwardedFor: a forged X-Forwarded-For must
@@ -88,5 +91,74 @@ func TestGetClientIPLengthCap(t *testing.T) {
 	req2.Header.Set("X-Real-IP", "198.51.100.2")
 	if got := getClientIP(req2); len(got) != len("198.51.100.2") {
 		t.Fatalf("getClientIP truncated a short key to %q", got)
+	}
+}
+
+// TestRateLimiterNoXFFBypass is the live middleware check for the hardening:
+// an attacker who forges rotating X-Forwarded-For values must still be
+// throttled on their real address. The limiter keys on X-Real-IP (when valid)
+// or RemoteAddr — never XFF — so the burst of 6 requests from one socket with
+// 6 different forged XFF headers must produce exactly one 429.
+func TestRateLimiterNoXFFBypass(t *testing.T) {
+	// max 5/min, mirroring the login limiter.
+	limiter := NewRateLimiterMiddleware(5, time.Minute)
+
+	var hits atomic.Int32
+	handler := limiter.Limit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	const remoteAddr = "203.0.113.55:4321"
+	for i := 0; i < 6; i++ {
+		req := httptest.NewRequest("POST", "/v1/auth/login", strings.NewReader(`{}`))
+		req.RemoteAddr = remoteAddr
+		// Forge a rotating X-Forwarded-For — a bypass attempt.
+		req.Header.Set("X-Forwarded-For", "10.0.0."+string(rune('0'+i)))
+		req.Header.Set("Content-Type", "application/json")
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		want := http.StatusOK
+		if i == 5 {
+			want = http.StatusTooManyRequests
+		}
+		if rr.Code != want {
+			t.Fatalf("request %d status = %d, want %d (limiter bypassed via forged XFF)", i, rr.Code, want)
+		}
+	}
+
+	if got := hits.Load(); got != 5 {
+		t.Fatalf("handler reached %d times, want 5 (the 6th request must be throttled)", got)
+	}
+}
+
+// TestRateLimiterKeysOnXRealIP: when the proxy provides a valid X-Real-IP the
+// limiter keys on it, so a burst from one real address (behind the proxy) is
+// throttled as one client even if RemoteAddr varies with each proxied request.
+func TestRateLimiterKeysOnXRealIP(t *testing.T) {
+	limiter := NewRateLimiterMiddleware(2, time.Minute)
+
+	var hits atomic.Int32
+	handler := limiter.Limit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Same real client, three proxied hops with different socket addresses.
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest("GET", "/v1/health", nil)
+		req.RemoteAddr = "192.168.1." + string(rune('0'+i)) + ":9999"
+		req.Header.Set("X-Real-IP", "203.0.113.99")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		want := http.StatusOK
+		if i == 2 {
+			want = http.StatusTooManyRequests
+		}
+		if rr.Code != want {
+			t.Fatalf("request %d status = %d, want %d", i, rr.Code, want)
+		}
 	}
 }

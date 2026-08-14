@@ -484,6 +484,13 @@ func (s *Service) AssignClient(ctx context.Context, actorID uuid.UUID, organizat
 		// they are no longer assigned to any other project in the org, and
 		// audits the removal explicitly.
 		pruneClientMembership := func(displaced uuid.UUID) error {
+			locked, err := s.Repo.LockClientMembership(dbCtx, tx, organizationID, displaced)
+			if err != nil {
+				return err
+			}
+			if !locked {
+				return nil // membership already gone (concurrent removal) — nothing to prune
+			}
 			onOther, err := s.Repo.IsClientOnAnyOtherProject(dbCtx, tx, organizationID, displaced, projectID)
 			if err != nil {
 				return err

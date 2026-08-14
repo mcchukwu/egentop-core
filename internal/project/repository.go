@@ -635,6 +635,26 @@ func (r *Repository) IsClientOnAnyOtherProject(ctx context.Context, q Queryer, o
 	return exists, nil
 }
 
+// LockClientMembership locks the user's membership row in the organization
+// FOR UPDATE. Returns (false, nil) when the row no longer exists (caller
+// skips the prune). Serializes the prune of a displaced client against
+// concurrent assignment or removal of that client.
+func (r *Repository) LockClientMembership(ctx context.Context, tx *sql.Tx, organizationID uuid.UUID, userID uuid.UUID) (bool, error) {
+	var id uuid.UUID
+	err := tx.QueryRowContext(ctx, `
+		SELECT id FROM memberships
+		WHERE organization_id = $1 AND user_id = $2
+		FOR UPDATE
+	`, organizationID, userID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, apperrors.ErrDatabase
+	}
+	return true, nil
+}
+
 // Queryer is the minimal interface satisfied by both *sql.DB and *sql.Tx.
 type Queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
@@ -800,22 +820,30 @@ func (r *Repository) ListAllMilestonesByProjectID(ctx context.Context, organizat
 }
 
 // IsActiveClientMember reports whether the user holds an active membership in
-// the organization with the client role.
-func (r *Repository) IsActiveClientMember(ctx context.Context, q Queryer, organizationID uuid.UUID, userID uuid.UUID) (bool, error) {
-	var exists bool
-	err := q.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM memberships m
-			JOIN roles r ON r.id = m.role_id
-			WHERE m.organization_id = $1
-			AND m.user_id = $2
-			AND m.status = 'active'
-			AND r.name = 'client'
-		)
-	`, organizationID, userID).Scan(&exists)
+// the organization with the client role, locking the membership row FOR SHARE
+// for the duration of the transaction. The lock serializes this check against
+// concurrent membership deletion (client.Remove, prune-on-displacement): if a
+// concurrent removal commits first, this read re-evaluates against the newest
+// row version (row gone -> false -> ErrClientNotFound); if this check acquires
+// the lock first, the removal blocks on it until this transaction commits, so
+// the project reference is committed before the removal can proceed.
+func (r *Repository) IsActiveClientMember(ctx context.Context, tx *sql.Tx, organizationID uuid.UUID, userID uuid.UUID) (bool, error) {
+	var membershipID uuid.UUID
+	err := tx.QueryRowContext(ctx, `
+		SELECT m.id
+		FROM memberships m
+		JOIN roles r ON r.id = m.role_id
+		WHERE m.organization_id = $1
+		AND m.user_id = $2
+		AND m.status = 'active'
+		AND r.name = 'client'
+		FOR SHARE OF m
+	`, organizationID, userID).Scan(&membershipID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
 		return false, apperrors.ErrDatabase
 	}
-	return exists, nil
+	return true, nil
 }

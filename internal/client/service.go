@@ -245,13 +245,13 @@ func (s *Service) ResetCredential(ctx context.Context, actorID uuid.UUID, orgID 
 // membership row is locked FOR UPDATE, then the project-attachment check runs
 // inside the same transaction:
 //
-//   - a concurrent AssignClient that commits first is visible to the project
-//     check -> 409 client_attached_to_project;
-//   - if this removal commits first, a concurrent assign's IsActiveClientMember
+//   - the FOR UPDATE membership lock serializes against AssignClient's FOR
+//     SHARE membership lock (IsActiveClientMember): either this removal sees
+//     the assignment commit first -> 409 client_attached_to_project, or the
+//     assignment sees this removal commit first -> the assign's membership
 //     check fails -> ErrClientNotFound -> the assign aborts.
 //
-// The lock ordering (membership row only) never conflicts with AssignClient's
-// project-row lock, so no deadlock is possible.
+// Only the membership row is locked on this path, so no deadlock is possible.
 func (s *Service) Remove(ctx context.Context, actorID uuid.UUID, orgID uuid.UUID, userID uuid.UUID) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()

@@ -39,6 +39,20 @@ func clientRemoveHandler(db *sql.DB, service *Service) http.Handler {
 	return mux
 }
 
+// clientListRemoveHandler adds the list route (client.list) to the remove
+// harness so a test can observe the membership disappearance through the API.
+func clientListRemoveHandler(db *sql.DB, service *Service) http.Handler {
+	h := NewHandler(service)
+	org := middleware.NewOrgMiddleware(db)
+	access := middleware.NewOrgAccessMiddleware(db)
+	rbac := middleware.NewRBACMiddleware(db)
+
+	mux := http.NewServeMux()
+	mux.Handle("GET /v1/orgs/{orgID}/clients", org.LoadOrg(access.RequireMembership(rbac.RequirePermission("client.list")(http.HandlerFunc(h.List)))))
+	mux.Handle("DELETE /v1/orgs/{orgID}/clients/{userID}", org.LoadOrg(access.RequireMembership(rbac.RequirePermission("client.provision")(http.HandlerFunc(h.Remove)))))
+	return mux
+}
+
 func doClientRemoveRequest(t *testing.T, handler http.Handler, orgID, userID, actorID uuid.UUID) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -278,5 +292,77 @@ func TestRemoveRequiresClientProvisionPermission(t *testing.T) {
 	}
 	if membershipCount != 1 {
 		t.Fatalf("membership count = %d, want 1", membershipCount)
+	}
+}
+
+// TestRemoveDisappearsFromClientsListHTTP: after a successful removal, GET
+// /clients no longer lists the client (observed through the API, not just the
+// DB), while the users row still exists.
+func TestRemoveDisappearsFromClientsListHTTP(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	staffID, orgID := seedClientOrg(t, db)
+	provisioned, err := svc.Provision(ctx, staffID, orgID, ProvisionRequest{
+		Email:     "list-" + uuid.NewString() + "@example.com",
+		FirstName: "List",
+		LastName:  "Me",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+
+	handler := clientListRemoveHandler(db, svc)
+
+	// The client is listed before removal.
+	req := httptest.NewRequest(http.MethodGet, "/v1/orgs/"+orgID.String()+"/clients", nil)
+	req = req.WithContext(requestctx.WithUserID(req.Context(), staffID))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list before removal status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var listEnv struct {
+		Data struct {
+			Pagination struct {
+				Total int `json:"total"`
+			} `json:"pagination"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &listEnv); err != nil {
+		t.Fatalf("decode list before removal: %v; body=%s", err, rr.Body.String())
+	}
+	if listEnv.Data.Pagination.Total != 1 {
+		t.Fatalf("clients listed before removal = %d, want 1", listEnv.Data.Pagination.Total)
+	}
+
+	// Remove through the API.
+	rr = doClientRemoveRequest(t, handler, orgID, provisioned.ClientID, staffID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("remove status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// The client is gone from the API listing.
+	req = httptest.NewRequest(http.MethodGet, "/v1/orgs/"+orgID.String()+"/clients", nil)
+	req = req.WithContext(requestctx.WithUserID(req.Context(), staffID))
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if err := json.Unmarshal(rr.Body.Bytes(), &listEnv); err != nil {
+		t.Fatalf("decode list after removal: %v; body=%s", err, rr.Body.String())
+	}
+	if listEnv.Data.Pagination.Total != 0 {
+		t.Fatalf("clients listed after removal = %d, want 0", listEnv.Data.Pagination.Total)
+	}
+
+	// The users row survives (removal never deletes the user).
+	var userCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE id = $1`, provisioned.ClientID).Scan(&userCount); err != nil {
+		t.Fatalf("count users: %v", err)
+	}
+	if userCount != 1 {
+		t.Fatalf("users row count = %d, want 1", userCount)
 	}
 }

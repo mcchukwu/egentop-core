@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	jwtparser "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/mcchukwu/egentop/internal/activity"
@@ -301,5 +302,149 @@ func TestInvalidOrgIDReturns400(t *testing.T) {
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil || env.Error == nil || env.Error.Code != "invalid_organization_id" {
 		t.Fatalf("invalid orgID error = %s, want code invalid_organization_id", rr.Body.String())
+	}
+}
+
+// TestMethodNotAllowedReturns405: a request whose method is not registered for
+// a known path must return 405 (not a 500 or a silent handler invocation).
+func TestMethodNotAllowedReturns405(t *testing.T) {
+	validation.Init()
+	db := routesIntegrationDB(t)
+	defer db.Close()
+
+	deps := testRouteDeps(t, db)
+	mux := http.NewServeMux()
+	registerRoutes(mux, deps)
+
+	token := seedAuthedUser(t, db)
+
+	// DELETE is not registered for /v1/me (only GET and PATCH are).
+	req := httptest.NewRequest(http.MethodDelete, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("method-not-allowed status = %d, want 405; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestBodyLimitHTTPRejectsOversizedAndAcceptsLargeValid drives the body-limit
+// middleware through the real route table: an oversized org-create payload is
+// 413 payload_too_large (not 500, not 400), while a normal payload still works.
+func TestBodyLimitHTTPRejectsOversizedAndAcceptsLargeValid(t *testing.T) {
+	validation.Init()
+	db := routesIntegrationDB(t)
+	defer db.Close()
+
+	deps := testRouteDeps(t, db)
+	mux := http.NewServeMux()
+	registerRoutes(mux, deps)
+
+	// Mirror the production chain order around the mux (body limit applies to
+	// every request).
+	bodyLimited := middleware.NewBodyLimitMiddleware().Limit(mux)
+
+	token := seedAuthedUser(t, db)
+
+	// Oversized body: >1MB of JSON string data.
+	big := `{"name": "` + strings.Repeat("a", 1<<20+10) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/orgs", strings.NewReader(big))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	bodyLimited.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized body status = %d, want 413; body=%s", rr.Code, rr.Body.String())
+	}
+	var env struct {
+		Error *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil || env.Error == nil || env.Error.Code != "payload_too_large" {
+		t.Fatalf("oversized body error = %s, want code payload_too_large", rr.Body.String())
+	}
+
+	// Normal body still succeeds.
+	req = httptest.NewRequest(http.MethodPost, "/v1/orgs", strings.NewReader(`{"name": "Valid Org"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	bodyLimited.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("valid org status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestLargeValidProjectDescriptionAccepted: a project description at the
+// 2000-char validation maximum must pass through the body limit untouched
+// (legitimate large payloads are not collateral damage of the 1MB cap).
+func TestLargeValidProjectDescriptionAccepted(t *testing.T) {
+	validation.Init()
+	db := routesIntegrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	deps := testRouteDeps(t, db)
+	mux := http.NewServeMux()
+	registerRoutes(mux, deps)
+
+	bodyLimited := middleware.NewBodyLimitMiddleware().Limit(mux)
+
+	token := seedAuthedUser(t, db)
+
+	// Give the authed user an org + owner membership + a project. Resolve the
+	// user id from the signed access token (user_id claim).
+	tokenClaims := jwtparser.MapClaims{}
+	if _, _, err := jwtparser.NewParser().ParseUnverified(token, tokenClaims); err != nil {
+		t.Fatalf("parse access token: %v", err)
+	}
+	userID := uuid.MustParse(tokenClaims["user_id"].(string))
+
+	var orgID, ownerRoleID, projectID uuid.UUID
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO organizations (name) VALUES ($1) RETURNING id
+	`, "Payload Org "+uuid.NewString()).Scan(&orgID); err != nil {
+		t.Fatalf("insert org: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT id FROM roles WHERE name = 'owner' AND organization_id IS NULL
+	`).Scan(&ownerRoleID); err != nil {
+		t.Fatalf("owner role: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO memberships (user_id, organization_id, role_id, status)
+		VALUES ($1, $2, $3, 'active')
+	`, userID, orgID, ownerRoleID); err != nil {
+		t.Fatalf("owner membership: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO projects (organization_id, created_by, name, status)
+		VALUES ($1, $2, $3, 'active') RETURNING id
+	`, orgID, userID, "Payload Project").Scan(&projectID); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+
+	desc := strings.Repeat("d", 2000)
+	body, _ := json.Marshal(map[string]string{"description": desc})
+
+	req := httptest.NewRequest(http.MethodPatch, "/v1/orgs/"+orgID.String()+"/projects/"+projectID.String(), bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	bodyLimited.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("2000-char description status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var gotDesc string
+	if err := db.QueryRowContext(ctx, `SELECT description FROM projects WHERE id = $1`, projectID).Scan(&gotDesc); err != nil {
+		t.Fatalf("read project description: %v", err)
+	}
+	if gotDesc != desc {
+		t.Fatalf("persisted description length = %d, want 2000 (body limit must not truncate valid payloads)", len(gotDesc))
 	}
 }
