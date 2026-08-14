@@ -206,7 +206,9 @@ func (s *Service) AddOrgMember(ctx context.Context, orgID uuid.UUID, actorID uui
 	return err
 }
 
-// GetOrgMembers returns all members of an organization
+// GetOrgMembers returns all staff members of an organization. Client-role
+// memberships are excluded at the query level (both the count and the list):
+// clients are project-scoped and must never appear in the staff directory.
 func (s *Service) GetOrgMembers(ctx context.Context, orgID uuid.UUID, q pagination.Query) ([]Membership, pagination.Meta, error) {
 	var members []Membership
 	var total int
@@ -217,8 +219,10 @@ func (s *Service) GetOrgMembers(ctx context.Context, orgID uuid.UUID, q paginati
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		if err := tx.QueryRowContext(dbCtx, `
 			SELECT count(*)
-			FROM memberships
-			WHERE organization_id = $1
+			FROM memberships m
+			JOIN roles r ON r.id = m.role_id
+			WHERE m.organization_id = $1
+			AND r.name <> 'client'
 		`, orgID).Scan(&total); err != nil {
 			return apperrors.ErrDatabase
 		}
@@ -235,6 +239,7 @@ func (s *Service) GetOrgMembers(ctx context.Context, orgID uuid.UUID, q paginati
 			FROM memberships m
 			JOIN roles r ON r.id = m.role_id
 			WHERE m.organization_id = $1
+			AND r.name <> 'client'
 			ORDER BY m.joined_at DESC
 			LIMIT $2 OFFSET $3
 		`, orgID, q.Limit, q.Offset())
@@ -292,6 +297,14 @@ func (s *Service) RemoveOrgMember(ctx context.Context, orgID uuid.UUID, actorID 
 			return apperrors.ErrForbidden
 		}
 
+		// Client memberships are removed exclusively through the project
+		// unassign flow (PUT .../projects/{projectID}/client with null): a
+		// client's access is project-scoped and removing their membership out
+		// from under an assigned project would strand the project reference.
+		if targetRole == RoleClient {
+			return apperrors.ErrClientAttachedToProject
+		}
+
 		// Remove from memberships table
 		var membershipID uuid.UUID
 
@@ -330,10 +343,19 @@ func (s *Service) RemoveOrgMember(ctx context.Context, orgID uuid.UUID, actorID 
 	return err
 }
 
-// UpdateOrgMemberRole updates a user's role in an organization
+// UpdateOrgMemberRole updates a user's role in an organization. The client
+// role is fully protected: it can never be granted via role update (clients
+// are provisioned through POST /orgs/{orgID}/clients), and an existing client
+// membership can never be re-role'd away (it is removed exclusively via the
+// project unassign flow). This blocks both escalating client memberships to
+// staff roles and demoting staff into the client role.
 func (s *Service) UpdateOrgMemberRole(ctx context.Context, orgID uuid.UUID, actorID uuid.UUID, userID uuid.UUID, newRole Role) error {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
+
+	if newRole == RoleClient {
+		return apperrors.ErrForbidden
+	}
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		if err := requireOwnerToGrantOwner(dbCtx, tx, orgID, actorID, newRole); err != nil {
@@ -345,7 +367,8 @@ func (s *Service) UpdateOrgMemberRole(ctx context.Context, orgID uuid.UUID, acto
 			return err
 		}
 
-		// Get the target user's current role and ensure it's not the owner
+		// Get the target user's current role and ensure it's neither the
+		// owner nor a client.
 		var currentRole Role
 
 		err = tx.QueryRowContext(dbCtx, `
@@ -364,6 +387,10 @@ func (s *Service) UpdateOrgMemberRole(ctx context.Context, orgID uuid.UUID, acto
 		}
 
 		if currentRole == RoleOwner {
+			return apperrors.ErrForbidden
+		}
+
+		if currentRole == RoleClient {
 			return apperrors.ErrForbidden
 		}
 

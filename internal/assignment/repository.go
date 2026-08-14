@@ -216,16 +216,19 @@ func (r *Repository) EnsureMilestoneInProject(ctx context.Context, tx *sql.Tx, o
 }
 
 // EnsureActiveMember verifies that the assignee has an active membership in
-// the organization. The row is locked for the duration of the create
-// transaction so a concurrent membership change cannot pass this check after
-// the assignment is inserted.
+// the organization with a STAFF role (client-role memberships are excluded:
+// assignments are a staff concept). The row is locked for the duration of the
+// create transaction so a concurrent membership change cannot pass this check
+// after the assignment is inserted.
 func (r *Repository) EnsureActiveMember(ctx context.Context, tx *sql.Tx, orgID, userID uuid.UUID) error {
 	var found uuid.UUID
 	err := tx.QueryRowContext(ctx, `
-		SELECT id
-		FROM memberships
-		WHERE organization_id = $1 AND user_id = $2 AND status = 'active'
-		FOR UPDATE
+		SELECT m.id
+		FROM memberships m
+		JOIN roles r ON r.id = m.role_id
+		WHERE m.organization_id = $1 AND m.user_id = $2 AND m.status = 'active'
+		AND r.name <> 'client'
+		FOR UPDATE OF m
 	`, orgID, userID).Scan(&found)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

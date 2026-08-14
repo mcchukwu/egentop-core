@@ -72,20 +72,20 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// validate active session
-		var exists bool
+		// validate active session and load the forced-password-change flag
+		var mustChangePassword bool
 
 		err = m.DB.QueryRowContext(r.Context(),
 			`
-				SELECT EXISTS (
-				SELECT 1
-				FROM sessions
-				WHERE id = $1
-				  AND user_id = $2
-				  AND revoked = false
-				  AND expires_at > NOW()
-			)`,
-			claims.SessionID, claims.UserID).Scan(&exists)
+				SELECT u.must_change_password
+				FROM sessions s
+				JOIN users u ON u.id = s.user_id
+				WHERE s.id = $1
+				  AND s.user_id = $2
+				  AND s.revoked = false
+				  AND s.expires_at > NOW()
+			`,
+			claims.SessionID, claims.UserID).Scan(&mustChangePassword)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				response.HandleError(w, apperrors.ErrSessionExpired)
@@ -95,14 +95,10 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		if !exists {
-			response.HandleError(w, apperrors.ErrSessionExpired)
-			return
-		}
-
 		// attach auth context
 		ctx := requestctx.WithUserID(r.Context(), claims.UserID)
 		ctx = requestctx.WithSessionID(ctx, claims.SessionID)
+		ctx = requestctx.WithMustChangePassword(ctx, mustChangePassword)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

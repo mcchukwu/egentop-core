@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/mcchukwu/egentop/pkg/pagination"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/mcchukwu/egentop/pkg/pagination"
 )
 
 func integrationDB(t *testing.T) *sql.DB {

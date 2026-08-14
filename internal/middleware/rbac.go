@@ -1,13 +1,13 @@
 package middleware
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/mcchukwu/egentop/internal/apperrors"
+	"github.com/mcchukwu/egentop/internal/audit"
 	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/response"
 )
@@ -61,7 +61,7 @@ func (m *RBACMiddleware) RequirePermission(permissionKey string) func(http.Handl
 			`, userID, organizationID, permissionKey).Scan(&role, &allowed)
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
-					_ = recordAuthzDecision(r.Context(), m.DB, organizationID, userID, permissionKey, "", uuid.Nil, false, "not a member")
+					_ = audit.RecordDecision(r.Context(), m.DB, organizationID, userID, permissionKey, "", uuid.Nil, false, "not a member")
 					response.HandleError(w, apperrors.ErrForbidden)
 					return
 				}
@@ -71,52 +71,15 @@ func (m *RBACMiddleware) RequirePermission(permissionKey string) func(http.Handl
 			}
 
 			if !allowed {
-				_ = recordAuthzDecision(r.Context(), m.DB, organizationID, userID, permissionKey, "", uuid.Nil, false, "role lacks permission")
+				_ = audit.RecordDecision(r.Context(), m.DB, organizationID, userID, permissionKey, "", uuid.Nil, false, "role lacks permission")
 				response.HandleError(w, apperrors.ErrForbidden)
 				return
 			}
 
-			_ = recordAuthzDecision(r.Context(), m.DB, organizationID, userID, permissionKey, "", uuid.Nil, true, "ok")
+			_ = audit.RecordDecision(r.Context(), m.DB, organizationID, userID, permissionKey, "", uuid.Nil, true, "ok")
 
 			ctx := requestctx.WithRole(r.Context(), role)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
-}
-
-// recordAuthzDecision writes an authorization decision to the audit log.
-func recordAuthzDecision(ctx context.Context, db *sql.DB, organizationID uuid.UUID, userID uuid.UUID, permissionKey string, resourceType string, resourceID uuid.UUID, allowed bool, reason string) error {
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO authz_decisions (
-			organization_id,
-			user_id,
-			permission_key,
-			resource_type,
-			resource_id,
-			allowed,
-			reason
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, organizationID, userID, permissionKey, nullableString(resourceType), nullableUUID(resourceID), allowed, reason)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func nullableString(s string) *string {
-	if s == "" {
-		return nil
-	}
-
-	return &s
-}
-
-func nullableUUID(id uuid.UUID) *uuid.UUID {
-	if id == uuid.Nil {
-		return nil
-	}
-
-	return &id
 }

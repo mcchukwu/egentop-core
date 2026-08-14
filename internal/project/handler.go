@@ -83,11 +83,13 @@ func (h *Handler) GetProjectByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, ok := requestctx.UserID(r.Context())
+	userID, ok := requestctx.UserID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrInvalidRequestBody)
 		return
 	}
+
+	role, _ := requestctx.Role(r.Context())
 
 	orgID, ok := requestctx.OrganizationID(r.Context())
 	if !ok {
@@ -95,7 +97,7 @@ func (h *Handler) GetProjectByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.Service.GetByID(r.Context(), orgID, projectID)
+	project, err := h.Service.ViewProject(r.Context(), userID, role, orgID, projectID)
 	if err != nil {
 		response.HandleError(w, err)
 		return
@@ -196,11 +198,13 @@ func (h *Handler) ListMilestonesByProjectID(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	_, ok := requestctx.UserID(r.Context())
+	userID, ok := requestctx.UserID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrInvalidRequestBody)
 		return
 	}
+
+	role, _ := requestctx.Role(r.Context())
 
 	orgID, ok := requestctx.OrganizationID(r.Context())
 	if !ok {
@@ -210,7 +214,7 @@ func (h *Handler) ListMilestonesByProjectID(w http.ResponseWriter, r *http.Reque
 
 	q := pagination.Parse(r.URL.Query().Get("page"), r.URL.Query().Get("limit"))
 
-	milestones, meta, err := h.Service.ListMilestonesByProjectID(r.Context(), orgID, projectID, q)
+	milestones, meta, err := h.Service.ListMilestonesByProjectID(r.Context(), userID, role, orgID, projectID, q)
 	if err != nil {
 		response.HandleError(w, err)
 		return
@@ -233,11 +237,13 @@ func (h *Handler) GetMilestoneByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, ok := requestctx.UserID(r.Context())
+	userID, ok := requestctx.UserID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrUnauthorized)
 		return
 	}
+
+	role, _ := requestctx.Role(r.Context())
 
 	orgID, ok := requestctx.OrganizationID(r.Context())
 	if !ok {
@@ -245,9 +251,15 @@ func (h *Handler) GetMilestoneByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	milestone, err := h.Service.GetMilestoneByID(r.Context(), orgID, projectID, milestoneID)
+	milestone, err := h.Service.GetMilestoneDetail(r.Context(), userID, role, orgID, projectID, milestoneID)
 	if err != nil {
 		response.HandleError(w, err)
+		return
+	}
+
+	// Client actors never see the agency-facing revision limit fields.
+	if role == "client" {
+		response.Success(w, http.StatusOK, "milestone fetched", newClientMilestoneDetail(milestone))
 		return
 	}
 
@@ -300,4 +312,412 @@ func (h *Handler) UpdateMilestone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Success(w, http.StatusOK, "milestone updated", milestone)
+}
+
+// AssignClient assigns, reassigns, or unassigns a project's client -
+// PUT /projects/{project_id}/client
+func (h *Handler) AssignClient(w http.ResponseWriter, r *http.Request) {
+	var req AssignClientRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	project, err := h.Service.AssignClient(r.Context(), userID, orgID, projectID, req.ClientID)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "client assigned", project)
+}
+
+// SubmitMilestone submits a milestone for client approval -
+// POST /projects/{project_id}/milestones/{milestone_id}/submit
+func (h *Handler) SubmitMilestone(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestoneID, err := uuid.Parse(r.PathValue("milestoneID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestone, err := h.Service.SubmitMilestone(r.Context(), userID, orgID, projectID, milestoneID)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "milestone submitted for approval", milestone)
+}
+
+// ApproveMilestone approves a submitted milestone (client sign-off) -
+// POST /projects/{project_id}/milestones/{milestone_id}/approve
+func (h *Handler) ApproveMilestone(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestoneID, err := uuid.Parse(r.PathValue("milestoneID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestone, err := h.Service.ApproveMilestone(r.Context(), userID, orgID, projectID, milestoneID)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "milestone approved", milestone)
+}
+
+// RequestMilestoneChanges requests changes on a submitted milestone -
+// POST /projects/{project_id}/milestones/{milestone_id}/changes-requested
+func (h *Handler) RequestMilestoneChanges(w http.ResponseWriter, r *http.Request) {
+	var req RequestChangesRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	if fields := validation.ValidateStruct(req); fields != nil {
+		response.ValidationError(w, fields)
+		return
+	}
+
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestoneID, err := uuid.Parse(r.PathValue("milestoneID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestone, err := h.Service.RequestMilestoneChanges(r.Context(), userID, orgID, projectID, milestoneID, req.Notes)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "changes requested", milestone)
+}
+
+// UpdateMilestoneStatus applies a generic staff status transition -
+// PATCH /projects/{project_id}/milestones/{milestone_id}/status
+func (h *Handler) UpdateMilestoneStatus(w http.ResponseWriter, r *http.Request) {
+	var req UpdateMilestoneStatusRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	if fields := validation.ValidateStruct(req); fields != nil {
+		response.ValidationError(w, fields)
+		return
+	}
+
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestoneID, err := uuid.Parse(r.PathValue("milestoneID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestone, err := h.Service.UpdateMilestoneStatus(r.Context(), userID, orgID, projectID, milestoneID, req.Status)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "milestone status updated", milestone)
+}
+
+// CreateDeliverable adds a link-based deliverable -
+// POST /projects/{project_id}/milestones/{milestone_id}/deliverables
+func (h *Handler) CreateDeliverable(w http.ResponseWriter, r *http.Request) {
+	var req CreateDeliverableRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	if fields := validation.ValidateStruct(req); fields != nil {
+		response.ValidationError(w, fields)
+		return
+	}
+
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestoneID, err := uuid.Parse(r.PathValue("milestoneID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	deliverable, err := h.Service.CreateDeliverable(r.Context(), userID, orgID, projectID, milestoneID, req.URL, req.Title, req.Description)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusCreated, "deliverable submitted", deliverable)
+}
+
+// DeleteDeliverable removes a deliverable -
+// DELETE /projects/{project_id}/milestones/{milestone_id}/deliverables/{deliverable_id}
+func (h *Handler) DeleteDeliverable(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestoneID, err := uuid.Parse(r.PathValue("milestoneID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	deliverableID, err := uuid.Parse(r.PathValue("deliverableID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	if err := h.Service.DeleteDeliverable(r.Context(), userID, orgID, projectID, milestoneID, deliverableID); err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "deliverable removed", nil)
+}
+
+// UpdateMilestonePaymentStatus updates a milestone's payment status -
+// PATCH /projects/{project_id}/milestones/{milestone_id}/payment-status
+func (h *Handler) UpdateMilestonePaymentStatus(w http.ResponseWriter, r *http.Request) {
+	var req UpdateMilestonePaymentStatusRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	if fields := validation.ValidateStruct(req); fields != nil {
+		response.ValidationError(w, fields)
+		return
+	}
+
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestoneID, err := uuid.Parse(r.PathValue("milestoneID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	milestone, err := h.Service.UpdateMilestonePaymentStatus(r.Context(), userID, orgID, projectID, milestoneID, req.Status)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "milestone payment status updated", milestone)
+}
+
+// GetApprovalView returns the shared client-facing deep link payload -
+// GET /projects/{project_id}/approval
+func (h *Handler) GetApprovalView(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	role, _ := requestctx.Role(r.Context())
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	view, err := h.Service.GetApprovalView(r.Context(), userID, role, orgID, projectID)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "approval view fetched", view)
+}
+
+// ListProjectActivities lists the project-scoped activity feed -
+// GET /projects/{project_id}/activities
+func (h *Handler) ListProjectActivities(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	role, _ := requestctx.Role(r.Context())
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	q := pagination.Parse(r.URL.Query().Get("page"), r.URL.Query().Get("limit"))
+
+	activities, meta, err := h.Service.ListProjectActivities(r.Context(), userID, role, orgID, projectID, q)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "activities fetched", pagination.NewResponse(activities, q, meta.Total))
 }

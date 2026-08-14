@@ -44,7 +44,8 @@ make migrate-up
 ```
 
 This uses the `migrate` CLI to apply `migrations/*.up.sql` in numeric order
-(`000001`, `000002`, `000003`) to the database in your `.env`.
+(`000001`, `000002`, `000003`, `000004`, `000005`) to the database in your
+`.env`.
 
 To roll back, run `make migrate-down` (one step at a time).
 
@@ -92,7 +93,7 @@ Adjust `-U`/`-d` to your `.env` `DB_USER`/`DB_NAME`.
 Many integration tests truncate tables between runs. Because `memberships`
 references `roles`, truncating `organizations CASCADE` also wipes the system
 roles. If you see missing-role failures, reset the whole schema and re-apply
-all three up migrations:
+all five up migrations:
 
 ```sql
 DROP SCHEMA public CASCADE;

@@ -29,3 +29,7 @@ func WithMembershipID(ctx context.Context, membershipID uuid.UUID) context.Conte
 func WithRole(ctx context.Context, role string) context.Context {
 	return set(ctx, RoleKey, role)
 }
+
+func WithMustChangePassword(ctx context.Context, mustChange bool) context.Context {
+	return set(ctx, MustChangePasswordKey, mustChange)
+}

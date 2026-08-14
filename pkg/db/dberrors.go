@@ -35,3 +35,15 @@ func IsForeignKeyViolation(err error) bool {
 
 	return pgErr.Code == "23503"
 }
+
+// AsPgError returns the underlying *pgconn.PgError, or nil when err is not a
+// Postgres error. Callers use it to inspect constraint names / codes.
+func AsPgError(err error) *pgconn.PgError {
+	var pgErr *pgconn.PgError
+
+	if !errors.As(err, &pgErr) {
+		return nil
+	}
+
+	return pgErr
+}

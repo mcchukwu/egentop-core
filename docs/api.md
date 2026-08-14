@@ -72,6 +72,11 @@ this shape:
   token. All other `/v1/orgs/{orgID}/...` routes additionally require an active
   membership in that organization and a role holding the required permission
   (see [Roles & Permissions](#roles-and-permissions)).
+- Users whose `users.must_change_password` flag is set (clients provisioned
+  with a one-time credential) receive `403 password_change_required` on every
+  authenticated route except `POST /v1/me/password`. The cookie-authenticated
+  routes (`refresh`, `logout`, `logout-all`) are exempt. The gate lifts once
+  the password is changed.
 
 ### Rate Limiting
 
@@ -409,6 +414,140 @@ Response `200`.
 
 Errors: `403` `forbidden`, `404` `membership_not_found`.
 
+Client-role memberships are **not** listed here and **cannot** be removed or
+re-role'd through the membership endpoints:
+
+- `GET /v1/orgs/{orgID}/members` excludes client-role memberships.
+- `PATCH /v1/orgs/{orgID}/members/{userID}` rejects `client` as the target
+  role (the DTO `oneof` validation returns `400 validation_error`) and rejects
+  any membership that currently holds the client role (`403 forbidden`).
+- `DELETE /v1/orgs/{orgID}/members/{userID}` on a client-role membership
+  returns `409 client_attached_to_project` — clients are removed exclusively
+  through the project unassign flow.
+
+---
+
+## Clients
+
+Clients are modeled as real users with a `client`-role membership (there is no
+separate clients table). A client's access is **project-scoped**: they can see
+only the projects assigned to them and the milestones, deliverables, payment
+status and activity of those projects.
+
+### POST /v1/orgs/{orgID}/clients
+Provisions a client account. Permission: `client.provision`.
+
+Request body:
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `email` | string | optional, valid email, max 100 |
+| `phone` | string | optional, valid Nigerian phone number |
+| `first_name` | string | required only when creating a new user, min 2, max 50 |
+| `last_name` | string | required only when creating a new user, min 2, max 50 |
+
+At least one of `email` or `phone` is required.
+
+Behavior:
+
+- **Existing user, not a member** — the user is reused and an active
+  `client` membership is created. No credential is issued: the user's existing
+  password remains authoritative (`credential_issued: false`).
+- **Existing user, already a member** — `409 already_member` (a user can hold
+  only one membership per organization).
+- **No matching user** — a new user is created with a random one-time
+  credential, `must_change_password = true`, and an active `client`
+  membership. The credential is returned **exactly once** in the response and
+  must be rotated via `POST /v1/me/password` before the client can do anything
+  else (see the password gate above).
+
+Provisioning never creates a default organization and never registers a
+session.
+
+Response `201` (new user created):
+
+```json
+{
+  "success": true,
+  "message": "client provisioned",
+  "data": {
+    "client_id": "uuid",
+    "email": "client@example.com",
+    "credential_issued": true,
+    "one_time_password": "k4M9xQ2vT7pW3bN8"
+  }
+}
+```
+
+Response `201` (existing user reused — no credential):
+
+```json
+{
+  "success": true,
+  "message": "client provisioned",
+  "data": {
+    "client_id": "uuid",
+    "email": "user@example.com",
+    "credential_issued": false
+  }
+}
+```
+
+Errors: `400` `validation_error`, `409` `already_member` /
+`email_already_exists` / `phone_already_exists`.
+
+### GET /v1/orgs/{orgID}/clients
+Lists the organization's clients (client-role memberships only; staff
+memberships are excluded), newest first. Permission: `client.list`. Paginated.
+
+Response `200`:
+
+```json
+{
+  "items": [
+    {
+      "user_id": "uuid",
+      "email": "client@example.com",
+      "phone": null,
+      "first_name": "Ada",
+      "last_name": "Okafor",
+      "joined_at": "2026-08-11T10:00:00Z"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 1 }
+}
+```
+
+### POST /v1/orgs/{orgID}/clients/{userID}/reset-credential
+Rotates a client's one-time credential. Permission: `client.provision`.
+
+The target must hold an active `client` membership in the organization (else
+`404 client_not_found`). The operation:
+
+- replaces the password hash with a fresh one-time credential,
+- sets `must_change_password = true` (the gate re-arms),
+- revokes **all** of the client's sessions — a client still logged in with the
+  old credential loses access immediately.
+
+The new credential is returned exactly once.
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "message": "client credential reset",
+  "data": {
+    "client_id": "uuid",
+    "email": "client@example.com",
+    "credential_issued": true,
+    "one_time_password": "w6Zb2Dn5Hq8Lx3Mv"
+  }
+}
+```
+
+Errors: `404` `client_not_found`.
+
 ---
 
 ## Projects
@@ -440,6 +579,7 @@ Response `201` with the created project:
     "status": "draft",
     "priority": "medium",
     "due_date": "2026-12-31T00:00:00Z",
+    "client_id": null,
     "created_at": "2026-08-11T10:00:00Z",
     "updated_at": "2026-08-11T10:00:00Z"
   }
@@ -447,7 +587,11 @@ Response `201` with the created project:
 ```
 
 `status` is one of `draft`, `active`, `completed`, `archived`, `cancelled`.
-`priority` is one of `low`, `medium`, `high`.
+`priority` is one of `low`, `medium`, `high`. `client_id` is the project's
+assigned client (set via `PUT .../projects/{projectID}/client`), or `null`
+when no client is assigned. Project-level fields such as `revision_limit` are
+not exposed on the project payload; the effective revision limit surfaces on
+milestones (see the Milestones section).
 
 ### GET /v1/orgs/{orgID}/projects
 Lists projects in the organization. Permission: `project.list`. Paginated.
@@ -456,6 +600,9 @@ Response `200`: paginated list of project objects (shape above).
 
 ### GET /v1/orgs/{orgID}/projects/{projectID}
 Returns a single project. Permission: `project.view`.
+
+Client-role actors can only read the projects assigned to them; any other
+project resolves to `404 project_not_found` (existence never leaks).
 
 Response `200` with a project object.
 
@@ -477,6 +624,32 @@ Request body (all fields optional):
 Response `200` with the updated project.
 
 Errors: `400` `validation_error` / `invalid_status_transition`, `404` `project_not_found`.
+
+### PUT /v1/orgs/{orgID}/projects/{projectID}/client
+Assigns, reassigns, or unassigns the project's client. Permission:
+`project.client.assign`.
+
+Request body:
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `client_id` | string (UUID) or `null` | optional; `null` unassigns |
+
+Behavior:
+
+- **Assign** — the user must hold an active `client` membership in the
+  organization, else `404 client_not_found`.
+- **Reassign** — the previous client loses access to this project immediately
+  (the per-request scope check is authoritative).
+- **Unassign** (`null`) — removes the project's client. Unassign and reassign
+  both prune the displaced client's membership once they are no longer the
+  client of any other project in the organization.
+- No-op requests (no client / same client) succeed without changes.
+
+Response `200` with the updated project.
+
+Errors: `400` `validation_error`, `404` `project_not_found` /
+`client_not_found`.
 
 ---
 
@@ -510,6 +683,9 @@ Response `201` with the created milestone:
     "due_date": "2026-10-31T00:00:00Z",
     "position": 1,
     "completed_at": null,
+    "revision_count": 0,
+    "limit_reached": false,
+    "payment_status": "unpaid",
     "created_at": "2026-08-11T10:00:00Z",
     "updated_at": "2026-08-11T10:00:00Z"
   }
@@ -517,18 +693,41 @@ Response `201` with the created milestone:
 ```
 
 `status` is one of `pending`, `in_progress`, `awaiting_approval`, `completed`,
-`blocked`, `cancelled`.
+`blocked`, `cancelled`, `approved`, `changes_requested`. `payment_status` is
+one of `unpaid`, `partial`, `paid` (display-only; no money movement).
+`revision_count` is the number of submission rounds (initial submission = 1,
+each resubmission = +1). `revision_limit` (the effective limit) and
+`limit_reached` are agency-facing fields that surface on milestone read
+responses for staff actors; they are not part of this create response because
+no limit is configured yet.
 
 ### GET /v1/orgs/{orgID}/projects/{projectID}/milestones
 Lists milestones for a project. Permission: `milestone.list`. Paginated.
+Clients do not hold `milestone.list` — they reach milestones through the
+approval view and milestone detail — but the service-layer scope rule still
+applies defensively: a client-role actor resolves only their own project
+(else `404 project_not_found`). List items have the milestone shape above but
+do not embed `deliverables`; staff additionally see `revision_limit` (the
+effective limit: the milestone's override, else the project default, else
+`null` = unlimited) and `limit_reached` (`revision_count >= revision_limit`).
 
 ### GET /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}
-Returns a single milestone. Permission: `milestone.view`.
+Returns a single milestone with its `deliverables` embedded. Permission:
+`milestone.view`.
 
-Errors: `404` `milestone_not_found`.
+Staff receive the full milestone payload, including the agency-facing
+`revision_limit` and `limit_reached` fields. Client-role actors receive the
+same payload **without** `revision_limit` / `limit_reached` (the approval
+surface), and only for milestones of their own project.
+
+Errors: `404` `milestone_not_found` / `project_not_found` (client actor
+outside their project).
 
 ### PATCH /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}
-Updates milestone metadata and/or status. Permission: `milestone.update`.
+Updates milestone **metadata** (title, description, due date, position) only.
+Permission: `milestone.update`. Status changes go exclusively through the
+state-machine endpoints below (`submit` / `approve` / `changes-requested` /
+`PATCH .../status`).
 
 Request body (all fields optional):
 
@@ -542,6 +741,226 @@ Request body (all fields optional):
 Response `200` with the updated milestone.
 
 Errors: `400` `validation_error`, `404` `milestone_not_found`.
+
+### POST /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/submit
+Submits a milestone for client approval. Permission: `milestone.submit`
+(staff: owner, admin, member).
+
+Valid from `in_progress` or `changes_requested`. Creates a `milestone_revisions`
+row, increments `revision_count` by 1, and moves the milestone to
+`awaiting_approval`. Idempotent: an already-`awaiting_approval` milestone
+returns success with no duplicate revision row or counter increment.
+Blocked when the project is `archived` or `cancelled`.
+
+Request body: none.
+
+Response `200` with the updated milestone.
+
+Errors: `400` `project_has_no_client` (the project has no assigned client),
+`400` `deliverable_required` (the milestone has no deliverables),
+`400` `invalid_status_transition` (invalid source state or blocked project),
+`404` `milestone_not_found`.
+
+### POST /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/approve
+Approves a submitted milestone — the client's sign-off. Permission:
+`milestone.approve`. The service requires the actor to be the project's
+assigned client regardless of RBAC grants, so in practice this action is
+client-only (the `client` role is seeded with the key; the owner seed also
+carries it but is blocked by the same service check).
+
+Valid only from `awaiting_approval`. Idempotent: an already-`approved`
+milestone returns success with no duplicate events.
+
+Request body: none.
+
+Response `200` with the updated milestone.
+
+Errors: `404` `project_not_found` (actor is not the project's client),
+`409` `milestone_not_awaiting_approval` (stale state),
+`400` `invalid_status_transition` (project archived/cancelled).
+
+### POST /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/changes-requested
+Requests changes on a submitted milestone. Permission:
+`milestone.revision.request`. As with `approve`, the service requires the
+actor to be the project's assigned client regardless of RBAC grants, so in
+practice this action is client-only.
+
+Valid only from `awaiting_approval`; moves the milestone to
+`changes_requested`. **Not** idempotent: a stale request returns
+`409 milestone_not_awaiting_approval`.
+
+Request body:
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `notes` | string | required, min 3, max 2000 |
+
+Response `200` with the updated milestone.
+
+Errors: `404` `project_not_found` (actor is not the project's client),
+`409` `milestone_not_awaiting_approval`,
+`400` `invalid_status_transition` (project archived/cancelled).
+
+### PATCH /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/status
+Generic staff status transition. Permission: `milestone.status.update`
+(owner, admin).
+
+The action-only statuses (`awaiting_approval`, `approved`,
+`changes_requested`) are reached exclusively through `submit` / `approve` /
+`changes-requested` and are rejected here with a field error. Blocked when the
+project is `archived` or `cancelled`. `approved → completed` stamps
+`completed_at`. Same-state requests succeed without a transition event.
+
+Request body:
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `status` | string | required, one of `pending`, `in_progress`, `completed`, `blocked`, `cancelled` |
+
+Response `200` with the updated milestone.
+
+Errors: `400` `validation_error` / `invalid_status_transition`,
+`404` `milestone_not_found`.
+
+Allowed transitions:
+
+| Current | Allowed targets |
+|---------|-----------------|
+| `pending` | `in_progress`, `cancelled` |
+| `in_progress` | `pending`, `blocked`, `cancelled` |
+| `blocked` | `in_progress`, `cancelled` |
+| `awaiting_approval` | `blocked`, `cancelled` (escape hatch; never `completed`) |
+| `changes_requested` | `in_progress`, `blocked`, `cancelled` |
+| `approved` | `completed` |
+| `completed` / `cancelled` | — (terminal) |
+
+### POST /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/deliverables
+Adds a link-based deliverable to a milestone. Permission: `deliverable.submit`
+(staff: owner, admin, member). Duplicates are allowed; there is no edit —
+delete and re-add instead. Milestones in `completed` or `cancelled` state are
+frozen.
+
+Request body:
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `url` | string | required, `http://` or `https://`, max 2000 |
+| `title` | string | optional, max 200 |
+| `description` | string | optional, max 2000 |
+
+Response `201` with the created deliverable:
+
+```json
+{
+  "success": true,
+  "message": "deliverable submitted",
+  "data": {
+    "id": "uuid",
+    "organization_id": "uuid",
+    "milestone_id": "uuid",
+    "url": "https://figma.com/file/abc",
+    "title": "Homepage mockup",
+    "description": "Final direction v2",
+    "submitted_by": "uuid",
+    "submitted_at": "2026-08-11T10:00:00Z"
+  }
+}
+```
+
+Errors: `400` `validation_error` / `invalid_status_transition`,
+`404` `milestone_not_found`.
+
+### DELETE /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/deliverables/{deliverableID}
+Removes a deliverable. Permission: `deliverable.submit`. Milestones in
+`completed` or `cancelled` state are frozen.
+
+Response `200` (`data: null`).
+
+Errors: `400` `invalid_status_transition`, `404` `deliverable_not_found` /
+`milestone_not_found`.
+
+### PATCH /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/payment-status
+Updates the display-only payment status. Permission:
+`milestone.payment_status.update` (owner, admin). Any-to-any transitions are
+allowed and audited; no state restriction applies. Same-status requests
+succeed without an event.
+
+Request body:
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `status` | string | required, one of `unpaid`, `partial`, `paid` |
+
+Response `200` with the updated milestone.
+
+Errors: `400` `validation_error`, `404` `milestone_not_found`.
+
+---
+
+## Approval View
+
+### GET /v1/orgs/{orgID}/projects/{projectID}/approval
+Returns the shared client-facing approval payload — the deep link a client
+opens (e.g. from WhatsApp) to review and sign off on a project. Permission:
+`milestone.view`.
+
+Client-role actors resolve only their own project (else `404 project_not_found`).
+Staff can also use the endpoint. The payload is the project plus every
+milestone with its `deliverables`, `payment_status` and `revision_count`;
+revision limits and `limit_reached` are deliberately absent.
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "message": "approval view fetched",
+  "data": {
+    "project": {
+      "id": "uuid",
+      "organization_id": "uuid",
+      "created_by": "uuid",
+      "name": "Website Redesign",
+      "description": "Refresh the marketing site",
+      "status": "active",
+      "priority": "medium",
+      "due_date": "2026-12-31T00:00:00Z",
+      "client_id": "uuid",
+      "created_at": "2026-08-11T10:00:00Z",
+      "updated_at": "2026-08-11T10:00:00Z"
+    },
+    "milestones": [
+      {
+        "id": "uuid",
+        "project_id": "uuid",
+        "title": "Design Phase",
+        "description": "Finalize the design",
+        "status": "awaiting_approval",
+        "due_date": "2026-10-31T00:00:00Z",
+        "position": 1,
+        "revision_count": 2,
+        "payment_status": "partial",
+        "deliverables": [
+          {
+            "id": "uuid",
+            "organization_id": "uuid",
+            "milestone_id": "uuid",
+            "url": "https://figma.com/file/abc",
+            "title": "Homepage mockup",
+            "description": null,
+            "submitted_by": "uuid",
+            "submitted_at": "2026-08-11T10:00:00Z"
+          }
+        ],
+        "created_at": "2026-08-11T10:00:00Z",
+        "updated_at": "2026-08-11T10:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+Errors: `404` `project_not_found`.
 
 ---
 
@@ -628,10 +1047,24 @@ Response `200`:
 }
 ```
 
+### GET /v1/orgs/{orgID}/projects/{projectID}/activities
+Lists the activity feed scoped to a single project, newest first. Permission:
+`activity.project.list`. Client-role actors are restricted to their own project
+(else `404 project_not_found`); this is the activity surface clients may see.
+
+Response `200`: paginated list of activity objects (shape above).
+
+Errors: `404` `project_not_found` (client actor outside their project).
+
 Activity `type` values include: `project.created`, `project.archived`,
 `project.completed`, `project.status_changed`, `project.updated`,
+`project.client_assigned`, `project.client_removed`,
 `milestone.created`, `milestone.started`, `milestone.completed`,
 `milestone.cancelled`, `milestone.status_changed`, `milestone.updated`,
+`milestone.submitted`, `milestone.approved`, `milestone.changes_requested`,
+`milestone.payment_status_changed`,
+`deliverable.submitted`, `deliverable.removed`,
+`client.provisioned`, `client.credential_rotated`,
 `assignment.created`, `assignment.updated`, `assignment.removed`.
 
 ---
@@ -642,30 +1075,49 @@ Memberships point at a role. Requests to organization-scoped routes are granted
 when the member's role holds the required permission key. Every decision is
 written to the `authz_decisions` table.
 
-| Permission | Owner | Admin | Member | Viewer |
-|------------|:-----:|:-----:|:------:|:------:|
-| `member.list` | x | x | | |
-| `member.invite` | x | x | | |
-| `member.role.update` | x | | | |
-| `member.remove` | x | | | |
-| `project.create` | x | x | | |
-| `project.list` | x | x | x | x |
-| `project.view` | x | x | x | x |
-| `project.update` | x | x | | |
-| `project.status.update` | x | x | | |
-| `milestone.create` | x | x | | |
-| `milestone.list` | x | x | x | x |
-| `milestone.view` | x | x | x | x |
-| `milestone.update` | x | x | | |
-| `milestone.status.update` | x | x | | |
-| `assignment.create` | x | x | | |
-| `assignment.list` | x | x | x | x |
-| `assignment.view` | x | x | x | x |
-| `assignment.update` | x | x | | |
-| `assignment.remove` | x | x | | |
-| `org.view` | x | x | x | x |
-| `org.update` | x | x | | |
-| `activity.list` | x | x | x | x |
+| Permission | Owner | Admin | Member | Viewer | Client |
+|------------|:-----:|:-----:|:------:|:------:|:------:|
+| `member.list` | x | x | | | |
+| `member.invite` | x | x | | | |
+| `member.role.update` | x | | | | |
+| `member.remove` | x | | | | |
+| `project.create` | x | x | | | |
+| `project.list` | x | x | x | x | |
+| `project.view` | x | x | x | x | x |
+| `project.update` | x | x | | | |
+| `project.status.update` | x | x | | | |
+| `project.client.assign` | x | x | | | |
+| `milestone.create` | x | x | | | |
+| `milestone.list` | x | x | x | x | |
+| `milestone.view` | x | x | x | x | x |
+| `milestone.update` | x | x | | | |
+| `milestone.status.update` | x | x | | | |
+| `milestone.submit` | x | x | x | | |
+| `milestone.approve` | x\* | | | | x |
+| `milestone.revision.request` | x\* | | | | x |
+| `milestone.payment_status.update` | x | x | | | |
+| `deliverable.submit` | x | x | x | | |
+| `assignment.create` | x | x | | | |
+| `assignment.list` | x | x | x | x | |
+| `assignment.view` | x | x | x | x | |
+| `assignment.update` | x | x | | | |
+| `assignment.remove` | x | x | | | |
+| `org.view` | x | x | x | x | |
+| `org.update` | x | x | | | |
+| `activity.list` | x | x | x | x | |
+| `activity.project.list` | x | x | x | x | x |
+| `client.provision` | x | x | | | |
+| `client.list` | x | x | | | |
+
+\* `milestone.approve` and `milestone.revision.request` are seeded to the
+owner role (the owner seed grants every permission in the system), but the
+service layer additionally requires the actor to be the project's assigned
+client (`404 project_not_found` otherwise) — in practice these actions are
+client-only. The `client` role is system-seeded with only `project.view`,
+`milestone.view`, `milestone.approve`, `milestone.revision.request` and
+`activity.project.list`; clients are never granted list, org, member, or
+assignment keys, and their access is additionally project-scoped at the
+service layer.
 
 ---
 
@@ -677,6 +1129,8 @@ written to the `authz_decisions` table.
 | 400 | `invalid_status_transition` | Status change is not allowed |
 | 400 | `invalid_due_date` | Due date is invalid |
 | 400 | `weak_password` | Password is too weak |
+| 400 | `project_has_no_client` | Project has no client; submit-for-approval is unavailable |
+| 400 | `deliverable_required` | At least one deliverable is required before submission |
 | 401 | `invalid_credentials` | Email/phone or password is wrong |
 | 401 | `invalid_password` | Current password is wrong |
 | 401 | `unauthorized` | Missing or invalid access token |
@@ -686,17 +1140,22 @@ written to the `authz_decisions` table.
 | 403 | `forbidden` | Authenticated but not allowed |
 | 403 | `insufficient_permissions` | Role lacks the required permission |
 | 403 | `organization_suspended` | Organization is suspended |
+| 403 | `password_change_required` | Must change the one-time password before proceeding |
 | 404 | `organization_not_found` | Organization does not exist or is inactive |
 | 404 | `membership_not_found` | No membership for this user in the org |
 | 404 | `project_not_found` | Project does not exist or is outside the org |
 | 404 | `milestone_not_found` | Milestone does not exist or is outside the org |
 | 404 | `assignment_not_found` | Assignment does not exist or is outside the org |
+| 404 | `client_not_found` | User is not an active client of the org |
+| 404 | `deliverable_not_found` | Deliverable does not exist or is outside the milestone |
 | 409 | `user_not_found` | User does not exist |
 | 409 | `email_already_exists` | Email is already registered |
 | 409 | `phone_already_exists` | Phone is already registered |
 | 409 | `organization_slug_exists` | Organization slug is already taken |
 | 409 | `already_member` | User already belongs to the organization |
 | 409 | `invitation_pending` | Invitation is already pending for this user |
+| 409 | `milestone_not_awaiting_approval` | Milestone is not in `awaiting_approval` state |
+| 409 | `client_attached_to_project` | Client membership is attached to a project; unassign instead |
 | 429 | `rate_limited` | Too many requests |
 | 500 | `internal_server_error` | Unexpected server error |
 | 503 | `service_unavailable` | Database unavailable (readiness probe) |

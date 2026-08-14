@@ -113,3 +113,62 @@ func (r *Repository) List(ctx context.Context, orgID uuid.UUID, q pagination.Que
 
 	return activities, total, nil
 }
+
+// ListByProjectID returns the activity feed scoped to a single project
+// (project-scoped view for clients and staff), newest first.
+func (r *Repository) ListByProjectID(ctx context.Context, orgID uuid.UUID, projectID uuid.UUID, q pagination.Query) ([]Activity, int, error) {
+	var activities []Activity
+	var total int
+
+	if err := r.DB.QueryRowContext(ctx, `
+		SELECT count(*)
+		FROM activities
+		WHERE organization_id = $1
+		AND project_id = $2
+	`, orgID, projectID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := r.DB.QueryContext(ctx, `
+		SELECT
+			id,
+			organization_id,
+			project_id,
+			milestone_id,
+			actor_id,
+			type,
+			message,
+			metadata,
+			created_at
+		FROM activities
+		WHERE organization_id = $1
+		AND project_id = $2
+		ORDER BY created_at DESC
+		LIMIT $3 OFFSET $4
+	`, orgID, projectID, q.Limit, q.Offset())
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var a Activity
+		var metadata []byte
+
+		err := rows.Scan(&a.ID, &a.OrganizationID, &a.ProjectID, &a.MilestoneID, &a.ActorID, &a.Type, &a.Message, &metadata, &a.CreatedAt)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		if err := json.Unmarshal(metadata, &a.Metadata); err != nil {
+			a.Metadata = map[string]any{}
+		}
+
+		activities = append(activities, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	return activities, total, nil
+}

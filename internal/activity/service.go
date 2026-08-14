@@ -66,8 +66,24 @@ func (s *Service) List(ctx context.Context, orgID uuid.UUID, q pagination.Query)
 	return activities, pagination.NewMeta(q, total), nil
 }
 
-// NewActivity builds a new activity
+// ListByProjectID returns the activity feed scoped to a single project. The
+// caller (project service) enforces actor project scope before delegating.
+func (s *Service) ListByProjectID(ctx context.Context, orgID uuid.UUID, projectID uuid.UUID, q pagination.Query) ([]Activity, pagination.Meta, error) {
+	activities, total, err := s.Repo.ListByProjectID(ctx, orgID, projectID, q)
+	if err != nil {
+		return nil, pagination.Meta{}, err
+	}
+
+	return activities, pagination.NewMeta(q, total), nil
+}
+
+// NewActivity builds a new activity. The metadata argument is preserved;
+// nil becomes an empty object.
 func NewActivity(orgID uuid.UUID, actorID uuid.UUID, projectID *uuid.UUID, milestoneID *uuid.UUID, activityType string, message string, metadata map[string]any) LogActivityEntry {
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+
 	return LogActivityEntry{
 		OrganizationID: orgID,
 		ProjectID:      projectID,
@@ -77,6 +93,6 @@ func NewActivity(orgID uuid.UUID, actorID uuid.UUID, projectID *uuid.UUID, miles
 
 		Type:     activityType,
 		Message:  message,
-		Metadata: map[string]any{},
+		Metadata: metadata,
 	}
 }

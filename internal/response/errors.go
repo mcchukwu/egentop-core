@@ -81,6 +81,8 @@ func HandleError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusBadRequest, "weak_password", "weak password")
 	case errors.Is(err, apperrors.ErrInsufficientPermissions):
 		Error(w, http.StatusForbidden, "insufficient_permissions", "insufficient permissions")
+	case errors.Is(err, apperrors.ErrPasswordChangeRequired):
+		Error(w, http.StatusForbidden, "password_change_required", "you must change your password before continuing")
 
 		// USERS
 	case errors.Is(err, apperrors.ErrUserNotFound):
@@ -111,10 +113,22 @@ func HandleError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusNotFound, "milestone_not_found", "milestone not found")
 	case errors.Is(err, apperrors.ErrAssignmentNotFound):
 		Error(w, http.StatusNotFound, "assignment_not_found", "assignment not found")
+	case errors.Is(err, apperrors.ErrClientNotFound):
+		Error(w, http.StatusNotFound, "client_not_found", "client not found")
+	case errors.Is(err, apperrors.ErrDeliverableNotFound):
+		Error(w, http.StatusNotFound, "deliverable_not_found", "deliverable not found")
 	case errors.Is(err, apperrors.ErrInvalidStatusTransition):
 		Error(w, http.StatusBadRequest, "invalid_status_transition", "invalid status transition")
 	case errors.Is(err, apperrors.ErrInvalidDueDate):
 		Error(w, http.StatusBadRequest, "invalid_due_date", "invalid due date")
+	case errors.Is(err, apperrors.ErrProjectHasNoClient):
+		Error(w, http.StatusBadRequest, "project_has_no_client", "project has no client")
+	case errors.Is(err, apperrors.ErrDeliverableRequired):
+		Error(w, http.StatusBadRequest, "deliverable_required", "at least one deliverable is required before submission")
+	case errors.Is(err, apperrors.ErrMilestoneNotAwaitingApproval):
+		Error(w, http.StatusConflict, "milestone_not_awaiting_approval", "milestone is not awaiting approval")
+	case errors.Is(err, apperrors.ErrClientAttachedToProject):
+		Error(w, http.StatusConflict, "client_attached_to_project", "client membership is attached to a project and cannot be removed directly")
 
 	// VALIDATION
 	case errors.Is(err, apperrors.ErrValidation):

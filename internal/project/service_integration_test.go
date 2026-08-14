@@ -233,7 +233,7 @@ func TestProjectReadsScopedToOrg(t *testing.T) {
 	svc := newTestService(db)
 
 	// Org A owns the project and milestone; Org B must not be able to read them.
-	_, orgAID, projectAID, milestoneAID := seedProject(t, db)
+	ownerAID, orgAID, projectAID, milestoneAID := seedProject(t, db)
 	_, orgBID, _, _ := seedProject(t, db)
 
 	// Positive: reads within the owning org succeed.
@@ -243,7 +243,7 @@ func TestProjectReadsScopedToOrg(t *testing.T) {
 	if _, err := svc.GetMilestoneByID(ctx, orgAID, projectAID, milestoneAID); err != nil {
 		t.Fatalf("GetMilestoneByID same org: %v", err)
 	}
-	milestones, meta, err := svc.ListMilestonesByProjectID(ctx, orgAID, projectAID, pagination.Query{Page: 1, Limit: 20})
+	milestones, meta, err := svc.ListMilestonesByProjectID(ctx, ownerAID, "owner", orgAID, projectAID, pagination.Query{Page: 1, Limit: 20})
 	if err != nil {
 		t.Fatalf("ListMilestonesByProjectID same org: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestProjectReadsScopedToOrg(t *testing.T) {
 	if !errors.Is(err, apperrors.ErrMilestoneNotFound) {
 		t.Fatalf("expected ErrMilestoneNotFound for cross-org GetMilestoneByID, got %v", err)
 	}
-	_, _, err = svc.ListMilestonesByProjectID(ctx, orgBID, projectAID, pagination.Query{Page: 1, Limit: 20})
+	_, _, err = svc.ListMilestonesByProjectID(ctx, ownerAID, "owner", orgBID, projectAID, pagination.Query{Page: 1, Limit: 20})
 	if !errors.Is(err, apperrors.ErrProjectNotFound) {
 		t.Fatalf("expected ErrProjectNotFound for cross-org milestone list, got %v", err)
 	}
@@ -275,7 +275,7 @@ func TestMilestoneListValidEmptyParent(t *testing.T) {
 	ownerID, orgID, _, _ := seedProject(t, db)
 	emptyProjectID := seedEmptyProject(t, db, orgID, ownerID)
 
-	milestones, meta, err := svc.ListMilestonesByProjectID(ctx, orgID, emptyProjectID, pagination.Query{Page: 1, Limit: 20})
+	milestones, meta, err := svc.ListMilestonesByProjectID(ctx, ownerID, "owner", orgID, emptyProjectID, pagination.Query{Page: 1, Limit: 20})
 	if err != nil {
 		t.Fatalf("list milestones for valid empty project: %v", err)
 	}
@@ -284,11 +284,11 @@ func TestMilestoneListValidEmptyParent(t *testing.T) {
 	}
 
 	_, missingOrgID, _, _ := seedProject(t, db)
-	_, _, err = svc.ListMilestonesByProjectID(ctx, missingOrgID, emptyProjectID, pagination.Query{Page: 1, Limit: 20})
+	_, _, err = svc.ListMilestonesByProjectID(ctx, ownerID, "owner", missingOrgID, emptyProjectID, pagination.Query{Page: 1, Limit: 20})
 	if !errors.Is(err, apperrors.ErrProjectNotFound) {
 		t.Fatalf("expected ErrProjectNotFound for cross-org milestone list, got %v", err)
 	}
-	_, _, err = svc.ListMilestonesByProjectID(ctx, orgID, uuid.New(), pagination.Query{Page: 1, Limit: 20})
+	_, _, err = svc.ListMilestonesByProjectID(ctx, ownerID, "owner", orgID, uuid.New(), pagination.Query{Page: 1, Limit: 20})
 	if !errors.Is(err, apperrors.ErrProjectNotFound) {
 		t.Fatalf("expected ErrProjectNotFound for missing project milestone list, got %v", err)
 	}

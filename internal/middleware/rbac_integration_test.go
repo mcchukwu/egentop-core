@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/mcchukwu/egentop/internal/membership"
 	"github.com/mcchukwu/egentop/internal/requestctx"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func integrationDB(t *testing.T) *sql.DB {

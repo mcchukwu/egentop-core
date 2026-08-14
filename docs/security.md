@@ -27,6 +27,72 @@ the operational responsibilities that remain.
   every session for the user.
 - Changing your password revokes all other sessions.
 
+## Client Trust Boundary
+
+Clients are real users holding a `client`-role membership — there is no
+separate clients table and no separate auth path. Their access is deliberately
+narrow at three layers:
+
+1. **RBAC** — the `client` role is seeded with only `project.view`,
+   `milestone.view`, `milestone.approve`, `milestone.revision.request` and
+   `activity.project.list`. Clients are never granted list, org, member, or
+   assignment keys (`project.list`, `milestone.list`, `org.*`, `member.*`,
+   `assignment.*`), so org-wide enumeration is impossible through the
+   permission system.
+2. **Project scope (service layer)** — because the permission system has no
+   resource dimension, client-role reads and actions additionally resolve only
+   when `projects.client_id` equals the actor's user ID. Any other project —
+   including one belonging to a different client — resolves to
+   `404 project_not_found` so existence never leaks.
+3. **Query level** — `member.list` excludes client-role memberships, and
+   clients cannot be listed or managed through the staff membership endpoints
+   (see [Escalation guards](#escalation-guards) below).
+
+The approval surface (`GET .../projects/{projectID}/approval`, milestone
+detail, project-scoped activity) strips agency-facing fields (`revision_limit`,
+`limit_reached`) before it reaches a client.
+
+### One-time credential lifecycle
+
+Clients are provisioned by the agency with a one-time credential, never by
+self-registration:
+
+- **Provisioning** (`POST /v1/orgs/{orgID}/clients`) — an existing user is
+  reused without a credential (their own password stays authoritative); a new
+  user receives a cryptographically random 16-character one-time password
+  (~93 bits of entropy, ambiguous characters excluded). The plaintext is
+  returned exactly once; only its bcrypt hash (cost 12) is stored.
+- **Forced rotation** — provisioned users have `must_change_password = true`.
+  The `RequirePasswordChanged` middleware returns
+  `403 password_change_required` on every authenticated route except
+  `POST /v1/me/password` (the cookie-authenticated `refresh` / `logout` /
+  `logout-all` routes are exempt). The gate lifts only when the user changes
+  the password. The one-time credential is agency-visible, so the client must
+  rotate it before they can act.
+- **Rotation by the agency** (`POST .../clients/{userID}/reset-credential`) —
+  replaces the password hash with a fresh one-time credential, re-arms
+  `must_change_password = true`, and revokes **all** of the client's sessions
+  in the same transaction. A client still logged in with the old credential
+  loses access immediately.
+
+### Escalation guards
+
+The client membership is the single representation of "this user is a client",
+so it is protected against every path that could escalate or strand it:
+
+- `member.role.update` rejects `client` as the target role and rejects any
+  membership that currently holds the client role (`403 forbidden`) — a client
+  can neither be escalated to a staff role nor re-role'd into one, and staff
+  cannot be demoted into the client role through this endpoint (the DTO
+  `oneof` validation rejects `client` outright).
+- `member.remove` on a client-role membership returns
+  `409 client_attached_to_project` — a client is removed exclusively through
+  the project unassign flow (`PUT .../projects/{projectID}/client` with
+  `null`), which prunes the membership only after the client holds no other
+  project in the organization.
+- Clients have no `assignment.*` keys, so assignments (staff workload) are
+  never visible to or manipulable by clients.
+
 ## Authorization (RBAC)
 
 - Permissions are enforced per request by the RBAC middleware using the
@@ -78,6 +144,15 @@ consistent coverage.
 - `audit_logs` records business events (who did what, to which entity, with
   metadata) inside the same transaction as the mutation.
 - `authz_decisions` records authorization attempts.
+- **Scope denials carry resource identity** — when the service layer denies a
+  request the permission system cannot express (a client actor outside their
+  project scope), it records a denied `authz_decisions` row with
+  `resource_type`/`resource_id` populated (e.g. the project), so denial
+  analytics can answer per-resource questions.
+- Layer-1 business events use versioned metadata
+  (`{"schema_version": 1, "before", "after", "reason"}`) with stable action
+  keys, and the milestone state machine writes an audit row on every
+  transition — that row is the status-transition history.
 - This gives both an operational trail and a security investigation trail.
 
 ## Error Handling

@@ -86,6 +86,16 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, currentS
 			return err
 		}
 
+		// Clear the forced-password-change flag (set for one-time credentials).
+		// The password has just been rotated by its owner, so the gate lifts.
+		if _, err := tx.ExecContext(dbCtx, `
+			UPDATE users
+			SET must_change_password = false
+			WHERE id = $1
+		`, userID); err != nil {
+			return apperrors.ErrDatabase
+		}
+
 		// Revoke every other active session; the current one stays valid.
 		if _, err := tx.ExecContext(dbCtx, `
 			UPDATE sessions

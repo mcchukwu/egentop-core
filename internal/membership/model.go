@@ -13,6 +13,7 @@ const (
 	RoleAdmin  Role = "admin"
 	RoleMember Role = "member"
 	RoleViewer Role = "viewer"
+	RoleClient Role = "client"
 )
 
 type MembershipStatus string

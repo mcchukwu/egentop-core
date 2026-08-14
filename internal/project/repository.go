@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,6 +62,7 @@ func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID uu
 			status,
 			priority,
 			due_date,
+			client_id,
 			created_at,
 			updated_at
 		FROM projects
@@ -79,7 +81,7 @@ func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID uu
 	for rows.Next() {
 		var p Project
 
-		err := rows.Scan(&p.ID, &p.OrganizationID, &p.CreatedBy, &p.Name, &p.Description, &p.Status, &p.Priority, &p.DueDate, &p.CreatedAt, &p.UpdatedAt)
+		err := rows.Scan(&p.ID, &p.OrganizationID, &p.CreatedBy, &p.Name, &p.Description, &p.Status, &p.Priority, &p.DueDate, &p.ClientID, &p.CreatedAt, &p.UpdatedAt)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -155,7 +157,7 @@ func (r *Repository) CreateMilestone(ctx context.Context, tx *sql.Tx, milestone 
 }
 
 // ListMilestonesByProject lists all milestones for a project, scoped to an organization
-func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, projectID uuid.UUID, organizationID uuid.UUID, q pagination.Query) ([]Milestone, int, error) {
+func (r *Repository) ListMilestonesByProjectID(ctx context.Context, projectID uuid.UUID, organizationID uuid.UUID, q pagination.Query) ([]Milestone, int, error) {
 	var milestones []Milestone
 	var total int
 
@@ -166,32 +168,36 @@ func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, 
 		AND organization_id = $2
 	`
 
-	if err := db.QueryRowContext(ctx, countQuery, projectID, organizationID).Scan(&total); err != nil {
+	if err := r.DB.QueryRowContext(ctx, countQuery, projectID, organizationID).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
 	query := `
 		SELECT
-			id,
-			project_id,
-			organization_id,
-			title,
-			description,
-			status,
-			due_date,
-			position,
-			completed_at,
-			created_by,
-			created_at,
-			updated_at
-		FROM milestones
-		WHERE project_id = $1
-		AND organization_id = $2
-		ORDER BY created_at DESC
+			m.id,
+			m.project_id,
+			m.organization_id,
+			m.title,
+			m.description,
+			m.status,
+			m.due_date,
+			m.position,
+			m.completed_at,
+			m.created_by,
+			m.created_at,
+			m.updated_at,
+			m.revision_count,
+			COALESCE(m.revision_limit, p.revision_limit) AS effective_revision_limit,
+			m.payment_status
+		FROM milestones m
+		JOIN projects p ON p.id = m.project_id
+		WHERE m.project_id = $1
+		AND m.organization_id = $2
+		ORDER BY m.created_at DESC
 		LIMIT $3 OFFSET $4
 	`
 
-	rows, err := db.QueryContext(ctx, query, projectID, organizationID, q.Limit, q.Offset())
+	rows, err := r.DB.QueryContext(ctx, query, projectID, organizationID, q.Limit, q.Offset())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -201,10 +207,12 @@ func (r *Repository) ListMilestonesByProjectID(ctx context.Context, db *sql.DB, 
 	for rows.Next() {
 		var m Milestone
 
-		err := rows.Scan(&m.ID, &m.ProjectID, &m.OrganizationID, &m.Title, &m.Description, &m.Status, &m.DueDate, &m.Position, &m.CompletedAt, &m.CreatedBy, &m.CreatedAt, &m.UpdatedAt)
+		err := rows.Scan(&m.ID, &m.ProjectID, &m.OrganizationID, &m.Title, &m.Description, &m.Status, &m.DueDate, &m.Position, &m.CompletedAt, &m.CreatedBy, &m.CreatedAt, &m.UpdatedAt, &m.RevisionCount, &m.RevisionLimit, &m.PaymentStatus)
 		if err != nil {
 			return nil, 0, err
 		}
+
+		m.LimitReached = revisionLimitReached(m.RevisionCount, m.RevisionLimit)
 
 		milestones = append(milestones, m)
 	}
@@ -250,7 +258,7 @@ func (r *Repository) UpdateMilestoneDetails(ctx context.Context, tx *sql.Tx, mil
 
 // --- Tenant Isolation queries ---
 
-// GetByID gets a project by ID
+// GetProjectByIDAndOrganizationID gets an organization-scoped project.
 func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projectID uuid.UUID, organizationID uuid.UUID) (*Project, error) {
 	query := `
 		SELECT
@@ -262,6 +270,7 @@ func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projec
 			priority,
 			created_by,
 			due_date,
+			client_id,
 			created_at,
 			updated_at
 		FROM projects
@@ -271,7 +280,7 @@ func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projec
 
 	project := &Project{}
 
-	err := r.DB.QueryRowContext(ctx, query, projectID, organizationID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.CreatedAt, &project.UpdatedAt)
+	err := r.DB.QueryRowContext(ctx, query, projectID, organizationID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.ClientID, &project.CreatedAt, &project.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, apperrors.ErrProjectNotFound
 	}
@@ -295,6 +304,7 @@ func (r *Repository) GetProjectByIDAndOrganizationIDForUpdate(ctx context.Contex
 			priority,
 			created_by,
 			due_date,
+			client_id,
 			created_at,
 			updated_at
 		FROM projects
@@ -305,7 +315,7 @@ func (r *Repository) GetProjectByIDAndOrganizationIDForUpdate(ctx context.Contex
 
 	project := &Project{}
 
-	err := tx.QueryRowContext(ctx, query, projectID, organizationID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.CreatedAt, &project.UpdatedAt)
+	err := tx.QueryRowContext(ctx, query, projectID, organizationID).Scan(&project.ID, &project.OrganizationID, &project.Name, &project.Description, &project.Status, &project.Priority, &project.CreatedBy, &project.DueDate, &project.ClientID, &project.CreatedAt, &project.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, apperrors.ErrProjectNotFound
 	}
@@ -316,37 +326,441 @@ func (r *Repository) GetProjectByIDAndOrganizationIDForUpdate(ctx context.Contex
 	return project, nil
 }
 
-// GetMilestoneByIDAndOrganization gets a milestone by ID and organization ID
-func (r *Repository) GetMilestoneByIDAndProjectIDAndOrganizationID(ctx context.Context, milestoneID uuid.UUID, projectID uuid.UUID, organizationID uuid.UUID) (*Milestone, error) {
-	query := `
-		SELECT
-			id,
-			project_id,
-			organization_id,
-			title,
-			description,
-			status,
-			due_date,
-			position,
-			completed_at,
-			created_by,
-			created_at,
-			updated_at
-		FROM milestones
-		WHERE id = $1
-		AND project_id = $2
-		AND organization_id = $3
-	`
+const milestoneColumns = `
+	m.id,
+	m.project_id,
+	m.organization_id,
+	m.title,
+	m.description,
+	m.status,
+	m.due_date,
+	m.position,
+	m.completed_at,
+	m.created_by,
+	m.created_at,
+	m.updated_at,
+	m.revision_count,
+	COALESCE(m.revision_limit, p.revision_limit) AS effective_revision_limit,
+	m.payment_status
+`
 
-	milestone := &Milestone{}
+const milestoneSelectFrom = `
+	FROM milestones m
+	JOIN projects p ON p.id = m.project_id
+`
 
-	err := r.DB.QueryRowContext(ctx, query, milestoneID, projectID, organizationID).Scan(&milestone.ID, &milestone.ProjectID, &milestone.OrganizationID, &milestone.Title, &milestone.Description, &milestone.Status, &milestone.DueDate, &milestone.Position, &milestone.CompletedAt, &milestone.CreatedBy, &milestone.CreatedAt, &milestone.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, apperrors.ErrMilestoneNotFound
-	}
+func scanMilestoneRow(scan func(dest ...any) error) (*Milestone, error) {
+	var m Milestone
+
+	err := scan(&m.ID, &m.ProjectID, &m.OrganizationID, &m.Title, &m.Description, &m.Status, &m.DueDate, &m.Position, &m.CompletedAt, &m.CreatedBy, &m.CreatedAt, &m.UpdatedAt, &m.RevisionCount, &m.RevisionLimit, &m.PaymentStatus)
 	if err != nil {
 		return nil, err
 	}
 
-	return milestone, nil
+	m.LimitReached = revisionLimitReached(m.RevisionCount, m.RevisionLimit)
+
+	return &m, nil
+}
+
+// GetMilestoneByIDAndProjectIDAndOrganizationID gets a milestone by ID scoped
+// to a project and organization. The effective revision limit (milestone
+// override, else project default) is resolved via the projects join.
+func (r *Repository) GetMilestoneByIDAndProjectIDAndOrganizationID(ctx context.Context, milestoneID uuid.UUID, projectID uuid.UUID, organizationID uuid.UUID) (*Milestone, error) {
+	m, err := scanMilestoneRow(func(dest ...any) error {
+		return r.DB.QueryRowContext(ctx, `
+			SELECT `+milestoneColumns+`
+			`+milestoneSelectFrom+`
+			WHERE m.id = $1
+			AND m.project_id = $2
+			AND m.organization_id = $3
+		`, milestoneID, projectID, organizationID).Scan(dest...)
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperrors.ErrMilestoneNotFound
+		}
+		return nil, err
+	}
+
+	return m, nil
+}
+
+// GetMilestoneByIDAndProjectIDAndOrganizationIDForUpdate reads a milestone
+// with the same scope and locks the row for the duration of the transaction.
+// Used by every state-machine transition so concurrent actions serialize on
+// the milestone row.
+func (r *Repository) GetMilestoneByIDAndProjectIDAndOrganizationIDForUpdate(ctx context.Context, tx *sql.Tx, milestoneID uuid.UUID, projectID uuid.UUID, organizationID uuid.UUID) (*Milestone, error) {
+	m, err := scanMilestoneRow(func(dest ...any) error {
+		return tx.QueryRowContext(ctx, `
+			SELECT `+milestoneColumns+`
+			`+milestoneSelectFrom+`
+			WHERE m.id = $1
+			AND m.project_id = $2
+			AND m.organization_id = $3
+			FOR UPDATE OF m
+		`, milestoneID, projectID, organizationID).Scan(dest...)
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperrors.ErrMilestoneNotFound
+		}
+		return nil, err
+	}
+
+	return m, nil
+}
+
+// SetMilestoneStatus transitions a milestone to next, guarded by the current
+// status (stale writers get zero rows and ErrInvalidStatusTransition).
+// completed_at is stamped when the target status is 'completed' and is
+// preserved otherwise.
+func (r *Repository) SetMilestoneStatus(ctx context.Context, tx *sql.Tx, milestoneID uuid.UUID, projectID uuid.UUID, organizationID uuid.UUID, current MilestoneStatus, next MilestoneStatus) error {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE milestones
+		SET status = $1,
+		    completed_at = CASE WHEN $1::milestone_status = 'completed' THEN COALESCE(completed_at, NOW()) ELSE completed_at END,
+		    updated_at = NOW()
+		WHERE id = $2
+		AND project_id = $3
+		AND organization_id = $4
+		AND status = $5
+	`, next, milestoneID, projectID, organizationID, current)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return apperrors.ErrInvalidStatusTransition
+	}
+
+	return nil
+}
+
+// SubmitMilestone transitions a milestone to awaiting_approval, increments the
+// submission-round counter, and stamps updated_at — guarded by the current
+// status.
+func (r *Repository) SubmitMilestone(ctx context.Context, tx *sql.Tx, milestoneID uuid.UUID, projectID uuid.UUID, organizationID uuid.UUID, current MilestoneStatus) error {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE milestones
+		SET status = 'awaiting_approval',
+		    revision_count = revision_count + 1,
+		    updated_at = NOW()
+		WHERE id = $1
+		AND project_id = $2
+		AND organization_id = $3
+		AND status = $4
+	`, milestoneID, projectID, organizationID, current)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return apperrors.ErrInvalidStatusTransition
+	}
+
+	return nil
+}
+
+// CreateMilestoneRevision records one submission round in the revision
+// history (append-only; the row is the AI-relevant history artifact).
+func (r *Repository) CreateMilestoneRevision(ctx context.Context, tx *sql.Tx, organizationID uuid.UUID, milestoneID uuid.UUID, revisionNumber int, submittedBy uuid.UUID) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO milestone_revisions (
+			organization_id,
+			milestone_id,
+			revision_number,
+			submitted_by
+		)
+		VALUES ($1, $2, $3, $4)
+	`, organizationID, milestoneID, revisionNumber, submittedBy)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// SetMilestonePaymentStatus updates the display-only payment status, guarded
+// by the current value.
+func (r *Repository) SetMilestonePaymentStatus(ctx context.Context, tx *sql.Tx, milestoneID uuid.UUID, projectID uuid.UUID, organizationID uuid.UUID, current MilestonePaymentStatus, next MilestonePaymentStatus) error {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE milestones
+		SET payment_status = $1,
+		    updated_at = NOW()
+		WHERE id = $2
+		AND project_id = $3
+		AND organization_id = $4
+		AND payment_status = $5
+	`, next, milestoneID, projectID, organizationID, current)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return apperrors.ErrMilestoneNotFound
+	}
+
+	return nil
+}
+
+// AssignClient sets (or clears, when clientID is nil) the project's client,
+// scoped to the organization.
+func (r *Repository) AssignClient(ctx context.Context, tx *sql.Tx, projectID uuid.UUID, organizationID uuid.UUID, clientID *uuid.UUID) error {
+	result, err := tx.ExecContext(ctx, `
+		UPDATE projects
+		SET client_id = $1,
+		    updated_at = NOW()
+		WHERE id = $2
+		AND organization_id = $3
+	`, clientID, projectID, organizationID)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return apperrors.ErrProjectNotFound
+	}
+
+	return nil
+}
+
+// DeleteClientMembership removes the user's membership from the organization
+// and returns the deleted membership ID (nil id + nil error when no row
+// existed). Used when a client is unassigned or displaced from their last
+// project.
+func (r *Repository) DeleteClientMembership(ctx context.Context, tx *sql.Tx, organizationID uuid.UUID, userID uuid.UUID) (*uuid.UUID, error) {
+	var membershipID uuid.UUID
+	err := tx.QueryRowContext(ctx, `
+		DELETE FROM memberships
+		WHERE organization_id = $1
+		AND user_id = $2
+		RETURNING id
+	`, organizationID, userID).Scan(&membershipID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &membershipID, nil
+}
+
+// IsClientOnAnyOtherProject reports whether the user is still the assigned
+// client of any other project in the organization.
+func (r *Repository) IsClientOnAnyOtherProject(ctx context.Context, q Queryer, organizationID uuid.UUID, userID uuid.UUID, exceptProjectID uuid.UUID) (bool, error) {
+	var exists bool
+	err := q.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM projects
+			WHERE organization_id = $1
+			AND client_id = $2
+			AND id <> $3
+		)
+	`, organizationID, userID, exceptProjectID).Scan(&exists)
+	if err != nil {
+		return false, apperrors.ErrDatabase
+	}
+	return exists, nil
+}
+
+// Queryer is the minimal interface satisfied by both *sql.DB and *sql.Tx.
+type Queryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// CountDeliverables returns the number of deliverables on a milestone.
+func (r *Repository) CountDeliverables(ctx context.Context, q Queryer, organizationID uuid.UUID, milestoneID uuid.UUID) (int, error) {
+	var count int
+	err := q.QueryRowContext(ctx, `
+		SELECT count(*)
+		FROM milestone_deliverables
+		WHERE organization_id = $1
+		AND milestone_id = $2
+	`, organizationID, milestoneID).Scan(&count)
+	if err != nil {
+		return 0, apperrors.ErrDatabase
+	}
+	return count, nil
+}
+
+// CreateDeliverable inserts a link-based deliverable.
+func (r *Repository) CreateDeliverable(ctx context.Context, tx *sql.Tx, d *Deliverable) error {
+	err := tx.QueryRowContext(ctx, `
+		INSERT INTO milestone_deliverables (
+			organization_id,
+			milestone_id,
+			url,
+			title,
+			description,
+			submitted_by
+		)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, submitted_at
+	`, d.OrganizationID, d.MilestoneID, d.URL, d.Title, d.Description, d.SubmittedBy).Scan(&d.ID, &d.SubmittedAt)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// DeleteDeliverable removes a deliverable scoped to milestone and
+// organization. Zero affected rows means the deliverable does not exist.
+func (r *Repository) DeleteDeliverable(ctx context.Context, tx *sql.Tx, organizationID uuid.UUID, milestoneID uuid.UUID, deliverableID uuid.UUID) error {
+	result, err := tx.ExecContext(ctx, `
+		DELETE FROM milestone_deliverables
+		WHERE id = $1
+		AND organization_id = $2
+		AND milestone_id = $3
+	`, deliverableID, organizationID, milestoneID)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return apperrors.ErrDeliverableNotFound
+	}
+
+	return nil
+}
+
+// ListDeliverablesByMilestoneID returns a milestone's deliverables, oldest
+// first.
+func (r *Repository) ListDeliverablesByMilestoneID(ctx context.Context, organizationID uuid.UUID, milestoneID uuid.UUID) ([]Deliverable, error) {
+	rows, err := r.DB.QueryContext(ctx, `
+		SELECT
+			id,
+			organization_id,
+			milestone_id,
+			url,
+			title,
+			description,
+			submitted_by,
+			submitted_at
+		FROM milestone_deliverables
+		WHERE organization_id = $1
+		AND milestone_id = $2
+		ORDER BY submitted_at ASC
+	`, organizationID, milestoneID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var deliverables []Deliverable
+
+	for rows.Next() {
+		var d Deliverable
+		if err := rows.Scan(&d.ID, &d.OrganizationID, &d.MilestoneID, &d.URL, &d.Title, &d.Description, &d.SubmittedBy, &d.SubmittedAt); err != nil {
+			return nil, err
+		}
+		deliverables = append(deliverables, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return deliverables, nil
+}
+
+// GetDeliverableByID reads a deliverable scoped to milestone and organization
+// (used to capture the before-state for the removal audit).
+func (r *Repository) GetDeliverableByID(ctx context.Context, q Queryer, organizationID uuid.UUID, milestoneID uuid.UUID, deliverableID uuid.UUID) (*Deliverable, error) {
+	d := &Deliverable{}
+	err := q.QueryRowContext(ctx, `
+		SELECT
+			id,
+			organization_id,
+			milestone_id,
+			url,
+			title,
+			description,
+			submitted_by,
+			submitted_at
+		FROM milestone_deliverables
+		WHERE id = $1
+		AND organization_id = $2
+		AND milestone_id = $3
+	`, deliverableID, organizationID, milestoneID).Scan(&d.ID, &d.OrganizationID, &d.MilestoneID, &d.URL, &d.Title, &d.Description, &d.SubmittedBy, &d.SubmittedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperrors.ErrDeliverableNotFound
+		}
+		return nil, err
+	}
+	return d, nil
+}
+
+// ListAllMilestonesByProjectID returns every milestone of a project, in
+// natural (oldest first) order, with revision and payment fields resolved.
+// Used by the approval view.
+func (r *Repository) ListAllMilestonesByProjectID(ctx context.Context, organizationID uuid.UUID, projectID uuid.UUID) ([]Milestone, error) {
+	rows, err := r.DB.QueryContext(ctx, `
+		SELECT `+milestoneColumns+`
+		`+milestoneSelectFrom+`
+		WHERE m.project_id = $1
+		AND m.organization_id = $2
+		ORDER BY m.created_at ASC
+	`, projectID, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var milestones []Milestone
+
+	for rows.Next() {
+		m, err := scanMilestoneRow(func(dest ...any) error { return rows.Scan(dest...) })
+		if err != nil {
+			return nil, err
+		}
+		milestones = append(milestones, *m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return milestones, nil
+}
+
+// IsActiveClientMember reports whether the user holds an active membership in
+// the organization with the client role.
+func (r *Repository) IsActiveClientMember(ctx context.Context, q Queryer, organizationID uuid.UUID, userID uuid.UUID) (bool, error) {
+	var exists bool
+	err := q.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM memberships m
+			JOIN roles r ON r.id = m.role_id
+			WHERE m.organization_id = $1
+			AND m.user_id = $2
+			AND m.status = 'active'
+			AND r.name = 'client'
+		)
+	`, organizationID, userID).Scan(&exists)
+	if err != nil {
+		return false, apperrors.ErrDatabase
+	}
+	return exists, nil
 }

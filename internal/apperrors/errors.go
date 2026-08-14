@@ -91,6 +91,21 @@ var (
 
 	ErrInvalidDueDate = errors.New("invalid due date")
 
+	// LAYER-1 (client role, approvals, revisions, deliverables, payments)
+	ErrProjectHasNoClient = errors.New("project has no client")
+
+	ErrDeliverableRequired = errors.New("at least one deliverable is required")
+
+	ErrClientNotFound = errors.New("client not found")
+
+	ErrDeliverableNotFound = errors.New("deliverable not found")
+
+	ErrMilestoneNotAwaitingApproval = errors.New("milestone is not awaiting approval")
+
+	ErrClientAttachedToProject = errors.New("client membership is attached to a project")
+
+	ErrPasswordChangeRequired = errors.New("password change required")
+
 	// ASSIGNMENTS
 	ErrAssignmentNotFound = errors.New("assignment not found")
 

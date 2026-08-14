@@ -1,7 +1,7 @@
 package auth
 
 type RegisterRequest struct {
-	Email string `json:"email,omitempty" validate:"email,max=100"`
+	Email string `json:"email,omitempty" validate:"omitempty,email,max=100"`
 	Phone string `json:"phone,omitempty" validate:"omitempty,ngphone"`
 
 	Password string `json:"password" validate:"required,min=8,max=72"`

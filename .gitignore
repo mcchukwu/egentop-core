@@ -49,7 +49,7 @@ coverage/
 .air/
 
 # AI / AGENT PROJECT MEMORY
-.captain/
+# .captain/ (project memory — intentionally versioned, see commit 2026-08-14)
 
 # OPENCODE PROJECT AGENTS
 .opencode/

@@ -10,7 +10,7 @@ access control (RBAC).
 - Modular clean architecture (handler → service → repository)
 - REST API with `/v1` versioning
 - JWT access tokens + rotating HttpOnly refresh-token cookies
-- Per-organization RBAC with system template roles (`owner`, `admin`, `member`, `viewer`)
+- Per-organization RBAC with system template roles (`owner`, `admin`, `member`, `viewer`, `client`)
 - Multi-tenant data isolation enforced at the query level
 - PostgreSQL persistence with `update_updated_at_column()` triggers
 - Audit logging and a project activity feed
