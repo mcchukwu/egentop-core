@@ -13,7 +13,9 @@
         ┌─────────────────────────────────┐
         │  nginx (host service, TLS)      │  ← ONLY public entry point
         │  - certbot TLS                  │
-        │  - sanitizes X-Forwarded-For    │  ← HIGH-1 fix (see below)
+        │  - overwrites X-Real-IP /       │
+        │    X-Forwarded-For (rate-limit  │
+        │    trust boundary)              │
         │  - edge rate limit /v1/auth/*   │
         └──────────────┬──────────────────┘
                        │ 127.0.0.1:8080 (loopback only)
@@ -64,7 +66,7 @@ list of variables the application reads** (verified against
 | `JWT_ACCESS_TTL` | e.g. `15m` |
 | `JWT_REFRESH_TTL` | e.g. `720h` |
 | `CORS_ALLOWED_ORIGINS` | The **real** client origin(s), comma-separated, no wildcards |
-| `LOG_LEVEL` | `info` (default) — one of `debug`, `info`, `warn`, `error`; controls log verbosity |
+| `LOG_LEVEL` | `info` (default) — one of `debug`, `info`, `warn`, `error` (case-insensitive; unknown values fall back to `info`). `debug`/`info` keep Info+Warn+Error, `warn` drops Info, `error` drops Info+Warn (Error always prints) |
 
 Template: [`deploy/env/egentop.env.example`](../deploy/env/egentop.env.example)
 — install to `/etc/egentop/egentop.env` (root:egentop, mode 0640).
@@ -175,32 +177,31 @@ DSN.
 
 Terminate TLS at nginx and proxy to `localhost:8080`. **Full working config:
 [`deploy/nginx/egentop.conf`](../deploy/nginx/egentop.conf)** — TLS server
-block, HTTP→HTTPS redirect, HSTS, edge rate limiting, `client_max_body_size 1m`
-(the app has no body-size limit of its own; security-review MEDIUM-3).
+block, HTTP→HTTPS redirect, HSTS, edge rate limiting, and
+`client_max_body_size 1m`. The app enforces its own 1 MiB body limit
+(`413 payload_too_large`), so the nginx limit is the edge defense that stops
+oversized uploads before they reach the app.
 
-**Corrected `X-Forwarded-For` handling (security-review HIGH-1).**
+**Header trust boundary (rate limiting).**
 
-The app's in-memory rate limiter keys on the `X-Forwarded-For` header
-**verbatim** (`getClientIP` returns the header value if present). The old
-sample used:
+The app's in-memory rate limiter keys on `X-Real-IP` when it parses as a valid
+IP address, otherwise on the socket peer (`RemoteAddr`). `X-Forwarded-For` is
+**never** read by the app — a client-supplied header can neither rotate the
+limit key nor inflate the limiter map.
 
-```nginx
-# INSECURE — do not use:
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-```
-
-`$proxy_add_x_forwarded_for` *appends* the client's IP to any value the
-attacker already sent. Because the app keys on the whole header string, each
-forged value (`X-Forwarded-For: 1.2.3.4`, `1.2.3.5`, …) creates a fresh
-rate-limit bucket — a bypass — and an unbounded in-memory map (memory DoS).
-
-The corrected proxy **overwrites** the header with the IP nginx actually saw
-on the TCP connection (`$remote_addr`), which a client cannot forge:
+The consequence is that `X-Real-IP` itself must not be client-reachable: a
+directly-exposed app would let a client send `X-Real-IP: <any valid IP>` and
+rotate the key at will. The proxy must therefore **overwrite** both headers
+with the IP nginx actually saw on the TCP connection (`$remote_addr`), which a
+client cannot forge:
 
 ```nginx
 proxy_set_header X-Forwarded-For   $remote_addr;
 proxy_set_header X-Real-IP         $remote_addr;
 ```
+
+The app is only safe behind this sanitizing proxy — the shipped nginx config
+sets both headers this way on every location block.
 
 Edge rate limiting on the auth surface is added in the same file:
 
@@ -229,7 +230,8 @@ sudo certbot certonly --nginx -d api.example.com
 
 > If you later put Cloudflare in front of the VPS, nginx will see Cloudflare's
 > IP as `$remote_addr`; key the rate-limit zone on `$http_cf_connecting_ip`
-> instead (see the comment in the config).
+> instead, and set `proxy_set_header X-Real-IP $http_cf_connecting_ip` so the
+> app keys on the real client too (see the comment in the config).
 
 ## Deployment Paths
 
@@ -342,11 +344,13 @@ agency. [ ] = must pass.
 - [ ] **TLS valid** — `curl -fsS https://api.example.com/v1/live` returns
       200 with a trusted cert (certbot).
 - [ ] **Health** — `/v1/live` and `/v1/ready` both 200.
-- [ ] **XFF sanitization (HIGH-1)** — send a forged header:
-      `curl -s -H 'X-Forwarded-For: 203.0.113.9' https://api.example.com/v1/auth/login -d '{}'`
-      six times quickly; you must still hit the app's 429 limit (the key is
-      your real IP, not the forged value). Repeat with two different forged
-      values and confirm the limit is still hit at the same count.
+- [ ] **Proxy header sanitization (rate-limit trust boundary)** — send forged
+      `X-Forwarded-For` and `X-Real-IP` values:
+      `curl -s -H 'X-Forwarded-For: 203.0.113.9' -H 'X-Real-IP: 203.0.113.9' https://api.example.com/v1/auth/login -d '{}'`
+      six times quickly; you must still hit the app's 429 limit (the proxy
+      overwrites both headers, so the key is your real IP). Repeat with
+      different forged values and confirm the limit is still hit at the same
+      count.
 - [ ] **Edge rate limit** — hammering `/v1/auth/*` from one IP returns 429 at
       the nginx zone limit.
 - [ ] **Secure cookie** — after `POST /v1/auth/login` with valid credentials,

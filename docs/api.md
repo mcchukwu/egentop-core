@@ -43,6 +43,10 @@ Validation errors include a `fields` object mapping field names to messages:
 }
 ```
 
+Request bodies are limited to **1 MiB** by middleware (`MaxBytesReader`). A
+larger body fails the handler's JSON decode, and the middleware returns
+`413 payload_too_large` (JSON envelope) in place of the decode error.
+
 ### Pagination
 
 List endpoints accept `page` and `limit` query parameters. The default page is
@@ -88,7 +92,17 @@ this shape:
 | `POST /v1/me/password` | 5 / minute |
 | Everything else | 100 / minute |
 
-Exceeding a limit returns `429 Too Many Requests` with code `rate_limited`.
+Exceeding a limit returns `429 Too Many Requests` with a **plain-text** body
+(`too many requests`) — the limiter runs in middleware, before the JSON error
+envelope, so the `rate_limited` JSON code in the error handler is not produced
+by any current route.
+
+The limit is keyed on the request's **real IP**: the `X-Real-IP` header when it
+parses as a valid IP, otherwise the socket peer (`RemoteAddr`). `X-Forwarded-For`
+is **never** trusted. Because `X-Real-IP` is client-supplied at the socket, the
+application is only safe behind a proxy that overwrites both headers with the
+IP it actually observed (see [docs/security.md](security.md) and
+[docs/deployment.md](deployment.md)).
 
 ---
 
@@ -136,7 +150,8 @@ Response `200`:
 }
 ```
 
-Errors: `400` `validation_error`, `409` `email_already_exists` / `phone_already_exists`.
+Errors: `400` `validation_error` / `invalid_request_body` / `invalid_identifier`
+(both identifiers missing), `409` `email_already_exists` / `phone_already_exists`.
 
 ### POST /v1/auth/login
 Authenticates a user by email or phone. Sets the `refresh_token` cookie.
@@ -161,9 +176,11 @@ Response `200`:
 Every failed login is indistinguishable: an unknown identifier, a suspended
 account, and a wrong password all return `401 invalid_credentials` (no account
 enumeration via login; registration keeps its own `409` responses by accepted
-trade-off).
+trade-off). Login never returns `403 forbidden` — there is no producing code
+path for it.
 
-Errors: `400` `validation_error`, `401` `invalid_credentials`.
+Errors: `400` `validation_error` / `invalid_request_body` / `invalid_identifier`,
+`401` `invalid_credentials`.
 
 ### POST /v1/auth/refresh
 Rotates the refresh token from the `refresh_token` cookie and returns a new
@@ -262,7 +279,8 @@ Response `200`:
 }
 ```
 
-Errors: `400` `validation_error`, `401` `invalid_password`.
+Errors: `400` `validation_error` / `weak_password` (new password identical to
+the current one), `401` `invalid_password`.
 
 ---
 
@@ -380,11 +398,13 @@ Request body:
 
 Response `201`.
 
-Errors: `400` `validation_error`, `404` `user_not_found`, `409` `already_member`.
+Errors: `400` `validation_error`, `403` `forbidden` (non-owner granting
+`owner`), `404` `user_not_found`, `409` `already_member`.
 
 ### POST /v1/orgs/{orgID}/members/invite
-Invites a user by email. The invitation is created with status `invited` if the
-user exists; otherwise it is still recorded as pending. Permission:
+Invites an existing user by email. The invitation is created with status
+`invited`; the target user must already exist (`404 user_not_found`
+otherwise — invitations for non-existent users are not recorded). Permission:
 `member.invite`.
 
 Request body:
@@ -396,7 +416,8 @@ Request body:
 
 Response `201`.
 
-Errors: `400` `validation_error`, `409` `already_member` / `invitation_pending`.
+Errors: `400` `validation_error`, `403` `forbidden` (non-owner granting
+`owner`), `404` `user_not_found`, `409` `already_member` / `invitation_pending`.
 
 ### PATCH /v1/orgs/{orgID}/members/{userID}
 Changes a member's role. Permission: `member.role.update`.
@@ -650,7 +671,8 @@ Request body (all fields optional):
 
 Response `200` with the updated project.
 
-Errors: `400` `validation_error` / `invalid_status_transition`, `404` `project_not_found`.
+Errors: `400` `validation_error` / `invalid_status_transition` /
+`invalid_project_priority`, `404` `project_not_found`.
 
 ### PUT /v1/orgs/{orgID}/projects/{projectID}/client
 Assigns, reassigns, or unassigns the project's client. Permission:
@@ -747,16 +769,17 @@ Response `201` with the created milestone:
 `blocked`, `cancelled`, `approved`, `changes_requested`. `payment_status` is
 one of `unpaid`, `partial`, `paid` (display-only; no money movement).
 `revision_count` is the number of submission rounds (initial submission = 1,
-each resubmission = +1). `revision_limit` (the effective limit) and
-`limit_reached` are agency-facing fields that surface on milestone read
-responses for staff actors; they are not part of this create response because
-no limit is configured yet.
+each resubmission = +1). A newly created milestone has no limit configured, so
+the create response carries `limit_reached: false` and omits `revision_limit`
+(the field is nil at creation; the effective limit is computed at read time for
+staff-facing responses).
 
 ### GET /v1/orgs/{orgID}/projects/{projectID}/milestones
 Lists milestones for a project. Permission: `milestone.list`. Paginated.
-Clients do not hold `milestone.list` — they reach milestones through the
-approval view and milestone detail — but the service-layer scope rule still
-applies defensively: a client-role actor resolves only their own project
+Clients do not hold `milestone.list` (a client calling this route directly is
+denied `403 forbidden` by RBAC before the service layer); they reach milestones
+through the approval view and milestone detail. The service-layer scope rule
+still applies defensively: a client-role actor resolves only their own project
 (else `404 project_not_found`). List items have the milestone shape above but
 do not embed `deliverables`; staff additionally see `revision_limit` (the
 effective limit: the milestone's override, else the project default, else
@@ -1066,6 +1089,13 @@ Response `201` with the created assignment:
 }
 ```
 
+The assignee must hold an active **staff** membership in the organization
+(client-role memberships are excluded — assignments are a staff concept).
+
+Errors: `400` `validation_error`, `404` `project_not_found` /
+`milestone_not_found` / `membership_not_found` (assignee is not an active
+staff member).
+
 ### GET /v1/orgs/{orgID}/projects/{projectID}/assignments
 Lists assignments for a project. Permission: `assignment.list`. Paginated.
 
@@ -1084,6 +1114,9 @@ Request body:
 | `assigned_to` | string | required, UUID |
 
 Response `200` with the updated assignment.
+
+Errors: `400` `validation_error`, `404` `assignment_not_found` /
+`membership_not_found` (new assignee is not an active staff member).
 
 ### DELETE /v1/orgs/{orgID}/projects/{projectID}/assignments/{assignmentID}
 Removes an assignment. Permission: `assignment.remove`.
@@ -1139,6 +1172,14 @@ Activity `type` values include: `project.created`, `project.archived`,
 `deliverable.submitted`, `deliverable.removed`,
 `client.provisioned`, `client.credential_rotated`,
 `assignment.created`, `assignment.updated`, `assignment.removed`.
+
+A few of these are declared vocabulary but not currently emitted by any
+endpoint: `project.archived`, `project.completed`, `project.status_changed`,
+`milestone.started`, `milestone.completed` and `milestone.cancelled` — the
+status state machine writes `milestone.status_changed` for every transition
+(including `completed`/`cancelled`) and project status changes write
+`project.updated`. The reserved types exist so the vocabulary is stable for
+clients.
 
 ---
 
@@ -1199,23 +1240,23 @@ service layer.
 | HTTP | Code | Meaning |
 |------|------|---------|
 | 400 | `validation_error` | Request validation failed; `fields` carries details |
-| 400 | `invalid_request_body` | Request body could not be decoded |
+| 400 | `invalid_request_body` | Request body could not be decoded, or a path parameter is not a UUID |
 | 400 | `invalid_organization_id` | `orgID` path parameter is not a UUID |
 | 400 | `invalid_identifier` | Email/phone identifier is invalid |
 | 400 | `invalid_project_priority` | Project priority is invalid |
 | 400 | `invalid_status_transition` | Status change is not allowed |
 | 400 | `invalid_due_date` | Due date is invalid |
-| 400 | `weak_password` | Password is too weak |
+| 400 | `weak_password` | Password is too weak (or identical to the current password) |
 | 400 | `project_has_no_client` | Project has no client; submit-for-approval is unavailable |
 | 400 | `deliverable_required` | At least one deliverable is required before submission |
 | 401 | `invalid_credentials` | Failed login (unknown identifier, suspended account, or wrong password) |
 | 401 | `invalid_password` | Current password is wrong |
 | 401 | `unauthorized` | Missing or invalid access token |
-| 401 | `invalid_token` | Refresh token invalid or expired |
-| 401 | `session_expired` | Session has expired |
-| 401 | `session_revoked` | Session was revoked |
+| 401 | `invalid_token` | Refresh token invalid or expired (or malformed Authorization header) |
+| 401 | `session_expired` | The access token's session row is missing, revoked, or expired |
+| 401 | `session_revoked` | Session was revoked (refresh-token reuse detection) |
 | 403 | `forbidden` | Authenticated but not allowed |
-| 403 | `insufficient_permissions` | Role lacks the required permission |
+| 403 | `insufficient_permissions` | Reserved — mapped in the error handler, but no current route produces it (permission denials return `forbidden`) |
 | 403 | `organization_suspended` | Organization is suspended |
 | 403 | `password_change_required` | Must change the one-time password before proceeding |
 | 404 | `organization_not_found` | Organization does not exist or is inactive |
@@ -1225,7 +1266,7 @@ service layer.
 | 404 | `assignment_not_found` | Assignment does not exist or is outside the org |
 | 404 | `client_not_found` | User is not an active client of the org |
 | 404 | `deliverable_not_found` | Deliverable does not exist or is outside the milestone |
-| 405 | `method_not_allowed` | HTTP method not allowed for the resource |
+| 405 | `method_not_allowed` | Defined in the error mapper; in practice Go's `ServeMux` answers wrong-method requests with a plain-text `405` (no JSON envelope) |
 | 409 | `user_not_found` | User does not exist |
 | 409 | `email_already_exists` | Email is already registered |
 | 409 | `phone_already_exists` | Phone is already registered |
@@ -1235,6 +1276,6 @@ service layer.
 | 409 | `milestone_not_awaiting_approval` | Milestone is not in `awaiting_approval` state |
 | 409 | `client_attached_to_project` | Client membership is attached to a project; unassign instead |
 | 413 | `payload_too_large` | Request body exceeds the 1MB limit |
-| 429 | `rate_limited` | Too many requests |
+| 429 | `rate_limited` | Reserved — mapped in the error handler, but the rate limiter returns a plain-text `429` before the JSON envelope |
 | 500 | `internal_server_error` | Unexpected server error |
 | 503 | `service_unavailable` | Database unavailable (readiness probe) |

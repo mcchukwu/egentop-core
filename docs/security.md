@@ -15,6 +15,12 @@ the operational responsibilities that remain.
     JavaScript),
   - marked `Secure` when `APP_ENV=production` so they are only sent over HTTPS,
   - rotated on every refresh — each refresh invalidates the previous token.
+- **Login is anti-enumeration by design**: an unknown identifier, a suspended
+  account, and a wrong password all return the same `401 invalid_credentials`.
+  There is no `403 forbidden` and no per-state code on login. This is an
+  accepted trade-off: registration still returns its own `409
+  email_already_exists` / `phone_already_exists` responses, so account
+  existence is enumerable through the register endpoint by design.
 
 ## Session Management & Token Rotation
 
@@ -134,10 +140,30 @@ so it is protected against every path that could escalate or strand it:
 
 ## Rate Limiting
 
-In-memory rate limits protect auth and password endpoints (see the API docs for
-limits). Note: because the limiter is per-instance in-memory, production
+In-memory per-instance rate limits protect auth and password endpoints (see the
+API docs for limits). Because the limiter is per-instance in-memory, production
 deployments behind a load balancer should also enforce limits at the edge for
 consistent coverage.
+
+**Keying and trust boundary.** The limiter keys on the request's real IP: the
+`X-Real-IP` header when it parses as a valid IP address, otherwise the socket
+peer (`RemoteAddr`). `X-Forwarded-For` is **never** used — it is
+attacker-controllable and would allow both bypass (each forged value creates a
+fresh bucket) and memory exhaustion (unbounded limiter-map growth). The key is
+length-capped (64 bytes) so even a pathological fallback string cannot inflate
+the map.
+
+Because `X-Real-IP` is also client-supplied at the socket, the application is
+**only safe behind a sanitizing proxy** (see `docs/deployment.md`): the proxy
+must overwrite both `X-Real-IP` and `X-Forwarded-For` with the IP it actually
+observed on the TCP connection (`$remote_addr`). A directly-exposed instance
+would let a client forge `X-Real-IP: <any valid IP>` and bypass the limit.
+The nginx edge rate limit is the first line of defense; the app's per-endpoint
+limits are the second.
+
+**Request-body limit.** Every request body is bounded to 1 MiB by middleware
+(`MaxBytesReader`); an overrun is returned as `413 payload_too_large`. This
+prevents unbounded streaming on any route, public or authenticated.
 
 ## Audit Logging
 
@@ -159,6 +185,12 @@ consistent coverage.
 
 - Errors are mapped to generic, non-revealing messages. Internal failures
   return `internal_server_error` without leaking stack traces or SQL details.
+- Client-triggerable bad input — undecodable bodies, invalid `orgID`/identifier
+  path values, invalid project priorities — maps to 4xx codes
+  (`invalid_request_body`, `invalid_organization_id`, `invalid_identifier`,
+  `invalid_project_priority`) instead of `500`. (Unsupported HTTP methods are
+  answered with a plain-text `405` by Go's `ServeMux`; the mapper also defines
+  a `method_not_allowed` code.)
 - Validation errors intentionally expose field names only.
 
 ## Operational Responsibilities

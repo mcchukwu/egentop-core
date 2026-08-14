@@ -1,9 +1,17 @@
 # Egentop-Core
 
-Egentop-Core is the core backend service for the Egentop project. It is a
-multi-tenant REST API for managing organizations, projects, milestones,
-assignments and members with JWT authentication and per-organization role-based
-access control (RBAC).
+Egentop is an AI-powered operations platform for service businesses, built in
+four layers: **Workflow → Operations → Financial → Intelligence**. This
+repository is the core backend — a multi-tenant REST API with JWT
+authentication, per-organization role-based access control (RBAC), and a
+workflow layer that already covers the near-term product wedge: clients,
+milestone approvals, revision limits, deliverables and payment status.
+
+**Current phase: API-first validation.** The backend (MVP + Layer-1 delta +
+reliability pass) is complete; there is no frontend yet. See the
+[API Reference](docs/api.md) for what the API does, the
+[Roadmap](docs/roadmap.md) for where the product is going, and
+[`.captain/ROADMAP.md`](.captain/ROADMAP.md) for the canonical roadmap.
 
 ## Features
 
@@ -51,7 +59,7 @@ flowchart TD
 ### Clone
 
 ```bash
-git clone https://github.com/mcchukwu/egentop-core.git ./egentop
+git clone https://github.com/mcchukwu/egentop ./egentop
 cd egentop
 ```
 
@@ -97,17 +105,23 @@ The server listens on `:8080` by default (or `APP_PORT`).
 
 ## Environment Variables
 
+The application reads exactly these variables (see `pkg/config/config.go`):
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_NAME` | `Egentop` | Application name |
 | `APP_PORT` | `8080` | HTTP listen port |
-| `APP_ENV` | `development` | `development` or `production` |
-| `DB_URL` | — | PostgreSQL connection URL |
-| `LOG_LEVEL` | `debug` | Log level |
-| `JWT_SECRET` | — | JWT signing secret, **at least 32 characters** |
+| `APP_ENV` | — | Required: `development` or `production` (`production` makes the refresh cookie `Secure`) |
+| `DB_URL` | — | PostgreSQL connection URL (required) |
+| `JWT_SECRET` | — | JWT signing secret, **at least 32 characters** (required) |
 | `JWT_ACCESS_TTL` | `15m` | Access token lifetime (Go duration) |
 | `JWT_REFRESH_TTL` | `720h` | Refresh token lifetime (Go duration) |
 | `CORS_ALLOWED_ORIGINS` | — | Comma-separated allowed origins (required) |
+| `LOG_LEVEL` | `info` | One of `debug`, `info`, `warn`, `error` (unknown → `info`) |
+
+The `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` /
+`DB_SSLMODE` variables in `.env.example` are used by the `Makefile` targets
+(`migrate-up`, `migrate-down`, `authz-decisions-cleanup`) to build a local DSN
+— the running app reads `DB_URL` only.
 
 ## Project Structure
 
