@@ -1,8 +1,8 @@
 # Egentop — Roadmap
 
 > Statuses: **[committed]** decided and will be done · **[planned]** sequenced intent, not yet started · **[proposed]** discussed, awaiting decision · **[deferred]** explicitly shelved
-> Note: `docs/roadmap.md` is the legacy MVP-era roadmap (generic PM framing) and predates the four-layer vision — it needs reconciliation. This file is the current product roadmap.
-> Last updated: 2026-08-13
+> Note: `docs/roadmap.md` is now reconciled to this roadmap (2026-08-14, Q9 resolved) — a truthful human-readable summary pointing here as canonical. This file is the current product roadmap.
+> Last updated: 2026-08-14
 
 ## Vision
 
@@ -28,17 +28,14 @@ Each layer unlocks the next. Escrow is a feature of Layer 3, not the product. AI
 
 - [x] **Competitive research** (done 2026-08-13) — wedge validated and reframed; founder-approved 2026-08-14
 - [x] **Fix tenant-isolation hole** (done 2026-08-13)
-- [x] **Layer-1 delta backend** (done 2026-08-14) — client role (Option A: user + membership + `client` system role + `projects.client_id` + service-layer project scoping); milestone approval state machine (reuses `awaiting_approval`; adds `approved` + `changes_requested`; submit/approve/changes-requested action endpoints + generic status PATCH); revision counter + `milestone_revisions` history + `limit_reached` at read; link-based deliverables; per-milestone payment status; client-facing approval deep link + project-scoped activity; `must_change_password` gate; credential rotation with session revocation. Every transition writes a versioned audit event (AI-readiness). Verified: 93 integration tests, race-scoped clean, migration round-trip, security review.
-- [x] **AI-readiness groundwork** (done 2026-08-14, folded into the delta) — activity metadata bug fixed; versioned audit metadata convention; `audit_logs(entity_type, entity_id, created_at)` index; audit row per state transition; `milestone_revisions` as revision history
-- [x] **Unit tests for pure logic** (done 2026-08-14) — state-machine transition table, VersionedMetadata, revisionLimitReached, OTP generator, URL validation
+- [x] **Layer-1 delta backend** (done 2026-08-14) — client role (Option A: user + membership + `client` system role + `projects.client_id` + service-layer project scoping); milestone approval state machine; revision counter + `milestone_revisions` history + `limit_reached` at read; link-based deliverables; per-milestone payment status; client-facing approval deep link + project-scoped activity; `must_change_password` gate; credential rotation with session revocation. Verified: 93 integration tests + unit tests, migration round-trip, security review.
+- [x] **AI-readiness groundwork** (done 2026-08-14, folded into the delta)
+- [x] **Reliability pass** (done 2026-08-14) — security exposure review; reliability batch (`b536853`: revision_limit setter, client removal endpoint, getClientIP hardening, error-mapper 400s, login 401 unification, 1MB body limit, LOG_LEVEL wiring); **assign/remove race fixed** (`9606e7b`, Database Specialist design, Tester-verified, Reviewer-approved); **CI test gate shipped** (`817c0c1`); **validation deployment artifacts + runbook** (`817c0c1`: Dockerfile, nginx TLS proxy with sanitized XFF + edge rate limit, prod compose, systemd, env template, retention cron); docs verified against code + `docs/roadmap.md` reconciled — Q9 resolved (`f3d0230`). **134/134 tests, 0 failures.**
+- [in progress] **Validation readiness** — founder picks provider/region (~$5–10/mo; London/Frankfurt recommended for WA latency); DevOps stands up the instance per `docs/deployment.md` + smoke checklist; API validation kit (wedge walkthrough, Postman collection, client deep-link demo); Product validation protocol (what to learn from 1–2 friendly agencies)
 - [proposed] **Email delivery** — buy (Resend/SES/Postmark class), one provider interface. Foundation for invites, reset, verification. Recommended; awaiting approval.
 - [proposed] **Close invitation loop** — accept/decline staff invitations; password reset. Client provisioning already works via one-time credentials (no email needed).
-- [proposed] **`revision_limit` admin setter** — schema + read-side wired; only the write endpoint is missing (small).
-- [x] **Validation-path decision** (done 2026-08-14) — API-first validation before any frontend (Q5); founder available daily (Q6)
-- [in progress] **Small engineering follow-ups** — `revision_limit` admin setter, provisioned-but-unassigned client removal path, `docs/deployment.md` rollback example fix
-- [proposed] **Reliability pass** — close test-coverage gaps (HTTP cross-org GET/PATCH, live concurrency-lock test); security hardening for validation exposure; CI test gate (recommended: ship before validation, pending founder re-review of the deploy-time deferral)
-- [proposed] **Validation readiness** — minimal deployment for the validation instance (DevOps); API validation kit (wedge walkthrough, Postman collection, client deep-link demo); Product validation protocol (what to learn from 1–2 friendly agencies)
-- [deferred → revisit at deploy] **Minimal CI test gate** — GitHub Actions + Postgres service container; founder deferred CI to deploy time; recommendation stands. Note: a CI gate must NOT run `-race` on the whole suite (pre-existing bcrypt-cost-12 timeout); scope `-race` to specific packages or lower bcrypt cost in tests.
+- [proposed] **Queued follow-up: deterministic membership-lock ordering** — eliminates the residual symmetric client-swap deadlock (rare, corruption-free 500). Small; not a validation blocker.
+- [deferred → revisit at deploy] **CI test gate** — SHIPPED 2026-08-14 (`817c0c1`). Note: must NOT run `-race` on the whole suite (pre-existing bcrypt-cost-12 timeout); scoped `-race` packages are clean.
 
 ## Medium-Term Work
 

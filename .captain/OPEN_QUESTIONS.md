@@ -66,13 +66,11 @@
 
 ---
 
-## Q9 — Legacy documentation reconciliation
+## Q9 — Legacy documentation reconciliation — **RESOLVED 2026-08-14**
 
 - **Question:** What happens to `docs/roadmap.md` (generic-PM framing, conflicts with the four-layer vision)?
-- **Why it matters:** Two roadmaps with different directions = contradiction; future sessions may read the wrong one. Also `README.md` describes the product as a generic PM API.
-- **Current understanding:** `.captain/ROADMAP.md` is now the current roadmap; `docs/roadmap.md` is legacy.
-- **Possible approaches:** Rewrite `docs/roadmap.md` to match the vision; or delete it and point to `.captain/`; update README framing.
-- **Information needed:** Founder preference. Low effort, do whenever convenient.
+- **Resolution (2026-08-14):** `docs/roadmap.md` was rewritten to the four-layer vision + API-first validation framing and now declares `.captain/ROADMAP.md` canonical at top and bottom. README framing also corrected. Done as part of the Documenter verification pass (`f3d0230`).
+- **Why it mattered:** Two roadmaps with different directions = contradiction; future sessions may read the wrong one.
 
 ---
 

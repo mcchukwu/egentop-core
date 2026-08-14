@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-08-14 — Reliability pass complete; race fix accepted; validation deployment next
+
+**Decision:** The reliability pass is complete and the backend is validation-ready: **134/134 tests pass, 0 failures**, CI gate live, Reviewer APPROVED. Decisions made within this pass:
+
+1. **CI test gate shipped now** (`817c0c1`) — on founder delegation, the Captain decided the pre-deploy deferral is re-opened: ship the test gate before validation (not at deploy). GitHub Actions `ci` on push+PR with postgres:18 service container; plain `go test ./...` (never full-suite `-race` — bcrypt-cost-12 timeout, documented).
+2. **Security findings applied** (`b536853`) — HIGH-1 XFF trust (code half + nginx sanitization at deploy), MEDIUM-1/2/3, LOW-2; MEDIUM-4 (org-existence oracle) **accepted for validation**, revisit pre-launch.
+3. **`LOG_LEVEL` wired, not removed** — it was a non-functional config var; the project's "config surface must be truthful" principle plus the ops checklist favored implementing threshold filtering (small) over deleting the var.
+4. **Assign/remove race fix accepted** (`9606e7b`) — Tester found a MAJOR race (concurrent assign + client removal could both commit, orphaning `projects.client_id` to a deleted membership; reproduced 5/5). The Database Specialist designed the fix: serialize assign and remove on the client membership row (`IsActiveClientMember` → `FOR SHARE OF m`, tx-enforced signature; prune acquires the displaced client's membership `FOR UPDATE` first — closing the same-class prune-path orphan). The Tester's naive candidates were rejected on the merits: locking `ClientHasProjects` is insufficient (locks only already-existing references) and would create an AB-BA deadlock cycle. Reviewer: APPROVED.
+5. **Residual swap deadlock deferred (documented, queued)** — two concurrent reassigns swapping the same two clients can deadlock (PG `40P01` → one 500, safe abort, NO corruption). Not a validation blocker; deterministic membership-lock ordering is a queued follow-up.
+6. **Docs pass + Q9 resolved** (`f3d0230`) — docs verified against code (code is the source of truth); `docs/roadmap.md` reconciled to the four-layer vision; `.captain/ROADMAP.md` canonical.
+
+**Context:** Founder delegated the recommended reliability work ("do all the recommended in the best order, I trust your decision"). The security exposure checklist from the review is the deploy gate (proxy+TLS, XFF sanitization, Secure cookies, fresh JWT secret, CORS, DB lockdown, retention cron, smoke test).
+
+**Consequences:** Backend requires no further engineering before validation. Next: founder picks provider/region (~$5–10/mo; London/Frankfurt recommended for WA latency) → DevOps stands up the instance per `docs/deployment.md`; API validation kit + Product validation protocol; founder runs the wedge with 1–2 friendly agencies.
+
+---
+
 ## 2026-08-14 — Validation path chosen: API-first; founder availability; follow-ups authorized
 
 **Decision:** Q5 RESOLVED — **API-first validation before any frontend.** Q6 RESOLVED — founder available daily/anytime (engineering capacity is agent-assisted; founder drives agency-facing contact). The backend is the core asset and **must be fully reliable before real agencies touch it** (reliability mandate). The three small engineering follow-ups are authorized: `revision_limit` admin setter, provisioned-but-unassigned client removal path, `docs/deployment.md` rollback example fix.
