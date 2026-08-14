@@ -1,0 +1,73 @@
+# Egentop — Docker path for the validation instance (Linux VPS).
+#
+# Layout: the app container and the Postgres container share an internal
+# compose network. Postgres has NO published port (not reachable from the
+# public internet or the host loopback — only from the app container, which
+# satisfies the "database not publicly reachable" deploy gate). The app
+# publishes 127.0.0.1:8080 on the host loopback ONLY. nginx is a HOST service
+# (apt-installed, see deploy/nginx/egentop.conf) and is the only public entry
+# point on 80/443. This keeps a single nginx config shared with the
+# bare-binary path.
+#
+# DB_URL inside this network is `postgres://...@postgres:5432/...`
+# (the compose service name). sslmode=disable is correct here: the traffic
+# never leaves the host; use sslmode=require for any remote/managed DB.
+#
+# Prereqs on the VPS:
+#   - docker + docker compose plugin
+#   - /etc/egentop/egentop.env (see deploy/env/egentop.env.example)
+#   - nginx + TLS certs (certbot) on the host, proxying to 127.0.0.1:8080
+#
+# Usage:
+#   docker compose -f deploy/docker/egentop-compose.prod.yaml up -d --build
+#
+# Database backup:
+#   docker compose -f deploy/docker/egentop-compose.prod.yaml \
+#     exec -T postgres pg_dump -U egentop egentop > backup_$(date +%F).sql
+#
+# Retention cleanup (weekly cron on the host):
+#   30 3 * * 0 root docker compose -f /opt/egentop/deploy/docker/egentop-compose.prod.yaml \
+#     exec -T egentop /usr/local/bin/authz-decisions-cleanup.sh \
+#     >> /var/log/egentop-authz-cleanup.log 2>&1
+# (the app image bundles postgresql-client; the script reads the mounted
+# env file inside the container, where `postgres` resolves to the DB service)
+#
+# This file is an example, not a deployment: replace image tags and paths to
+# match your host.
+
+services:
+  egentop:
+    image: egentop:validation-1
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - /etc/egentop/egentop.env
+    volumes:
+      # Mounted so the in-container retention cron script can read DB_URL.
+      - /etc/egentop/egentop.env:/etc/egentop/egentop.env:ro
+    ports:
+      - "127.0.0.1:8080:8080" # loopback only — never 0.0.0.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: egentop
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the shell or .env}
+      POSTGRES_DB: egentop
+    volumes:
+      - egentop_pgdata:/var/lib/postgresql
+    # No `ports:` — the database is never published.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U egentop -d egentop"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  egentop_pgdata:

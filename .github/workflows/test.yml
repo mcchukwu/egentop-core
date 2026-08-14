@@ -1,0 +1,92 @@
+# CI test gate for Egentop.
+#
+# Purpose: run the FULL test suite (unit + integration) against a live
+# PostgreSQL on every push and pull request. Integration tests skip unless
+# EGTEST_DB_URL is set; the schema is applied here because the tests do NOT
+# run migrations themselves.
+#
+# HARD CONSTRAINT (pre-existing, documented in .captain/): do NOT run
+# `go test -race ./...` on the whole suite. bcrypt cost 12 in the integration
+# tests makes the full suite time out under the race detector. This job runs
+# plain `go test ./...`. If a race run is ever added, scope it to a small
+# non-bcrypt package set (e.g. internal/project state-machine logic) or omit
+# it entirely.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: vet / build / test (PostgreSQL-backed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: egentop
+          POSTGRES_PASSWORD: egentop
+          POSTGRES_DB: egentop_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U egentop -d egentop_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # DSN for the Postgres service container (loopback on the runner).
+      EGTEST_DB_URL: postgres://egentop:egentop@localhost:5432/egentop_ci?sslmode=disable
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install psql client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+
+      - name: Wait for Postgres readiness
+        run: |
+          for i in $(seq 1 30); do
+            if pg_isready -h localhost -p 5432 -U egentop -d egentop_ci >/dev/null 2>&1; then
+              echo "Postgres is ready"
+              exit 0
+            fi
+            echo "waiting for Postgres ($i/30)..."
+            sleep 2
+          done
+          echo "Postgres did not become ready in time" >&2
+          exit 1
+
+      - name: Apply migrations
+        # ON_ERROR_STOP=1 so a failing statement fails the job instead of
+        # leaving a silently partial schema.
+        run: cat migrations/*.up.sql | psql -v ON_ERROR_STOP=1 "$EGTEST_DB_URL"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      # NOTE: no `-race` here — see the constraint comment at the top of this
+      # file. bcrypt cost 12 + full-suite race detector = timeout.
+      - name: go test (full suite, integration tests enabled)
+        run: go test ./...
+        timeout-minutes: 20

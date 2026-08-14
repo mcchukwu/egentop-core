@@ -1,0 +1,19 @@
+# /etc/cron.d/egentop-authz-cleanup  (root:root, mode 0644)
+#
+# Runs the authz_decisions retention cleanup weekly (Sunday 03:30 local time,
+# a low-traffic maintenance window). The script itself reads DB_URL from
+# /etc/egentop/egentop.env.
+#
+# Install:
+#   sudo install -m 0755 -o root -g root deploy/cron/authz-decisions-cleanup.sh /usr/local/bin/authz-decisions-cleanup.sh
+#   sudo install -m 0644 -o root -g root this-file /etc/cron.d/egentop-authz-cleanup
+#
+# For a standalone crontab instead (crontab -e):
+#   30 3 * * 0 /usr/local/bin/authz-decisions-cleanup.sh >> /var/log/egentop-authz-cleanup.log 2>&1
+#
+# Files in /etc/cron.d/ must contain an explicit user field (root below).
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+30 3 * * 0 root /usr/local/bin/authz-decisions-cleanup.sh >> /var/log/egentop-authz-cleanup.log 2>&1

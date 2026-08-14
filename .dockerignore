@@ -1,0 +1,22 @@
+# Build context exclusions for the Docker image.
+# The runtime image contains only the static binary — no sources, tests,
+# migrations, docs, or local state.
+
+.git
+.github
+.captain
+.opencode
+bin/
+dist/
+docs/
+deploy/
+*.md
+Makefile
+compose.yaml
+LICENSE
+.env
+.env.*
+coverage*
+*.log
+logs/
+tmp/

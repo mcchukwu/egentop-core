@@ -1,0 +1,53 @@
+# Egentop Core API — systemd unit (bare-binary deployment path).
+#
+# Install:
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin egentop
+#   sudo install -m 0755 -o root -g root -d /usr/local/bin
+#   sudo install -m 0755 -o root -g root -t /usr/local/bin /path/to/egentop   # static binary
+#   sudo install -d /etc/egentop -o root -g egentop -m 750
+#   sudo install -m 0640 -o root -g egentop deploy/env/egentop.env.example /etc/egentop/egentop.env
+#   # edit /etc/egentop/egentop.env with real values (see template comments)
+#   sudo install -m 0644 deploy/systemd/egentop.service /etc/systemd/system/egentop.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now egentop
+#
+# The app listens on :8080 (all interfaces). Keep port 8080 closed at the
+# firewall (ufw allow 80,443 only); nginx on the same host proxies to
+# 127.0.0.1:8080. If the host firewall cannot be used, bind loopback via a
+# tool such as iptables before starting this service.
+
+[Unit]
+Description=Egentop Core API (validation instance)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=egentop
+Group=egentop
+EnvironmentFile=/etc/egentop/egentop.env
+ExecStart=/usr/local/bin/egentop
+Restart=always
+RestartSec=5
+
+# Graceful shutdown: the app drains in-flight requests on SIGTERM with a 10s
+# timeout, then closes the DB pool. Give it room beyond that.
+TimeoutStopSec=20
+
+LimitNOFILE=65536
+
+# Hardening (systemd >= 243)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictRealtime=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
