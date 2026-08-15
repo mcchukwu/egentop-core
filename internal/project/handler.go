@@ -64,6 +64,8 @@ func (h *Handler) ListProjectsByOrganizationID(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	role, _ := requestctx.Role(r.Context())
+
 	q := pagination.Parse(r.URL.Query().Get("page"), r.URL.Query().Get("limit"))
 
 	projects, meta, err := h.Service.ListByOrganizationID(r.Context(), orgID, q)
@@ -72,7 +74,20 @@ func (h *Handler) ListProjectsByOrganizationID(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	response.Success(w, http.StatusOK, "projects fetched", pagination.NewResponse(projects, q, meta.Total))
+	// Client actors never see the agency-facing revision limit field. The
+	// project.list permission is staff-only today, but the payload split is
+	// kept at the handler level so a client-role response can never carry it.
+	if role == "client" {
+		response.Success(w, http.StatusOK, "projects fetched", pagination.NewResponse(projects, q, meta.Total))
+		return
+	}
+
+	details := make([]ProjectDetail, 0, len(projects))
+	for _, p := range projects {
+		details = append(details, newProjectDetail(&p))
+	}
+
+	response.Success(w, http.StatusOK, "projects fetched", pagination.NewResponse(details, q, meta.Total))
 }
 
 // GetProjectByID gets a project by ID - /projects/{id}
@@ -103,7 +118,13 @@ func (h *Handler) GetProjectByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response.Success(w, http.StatusOK, "project fetched", project)
+	// Client actors never see the agency-facing revision limit field.
+	if role == "client" {
+		response.Success(w, http.StatusOK, "project fetched", project)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "project fetched", newProjectDetail(project))
 }
 
 // Update updates a project's details (name, description, priority, due date, status)

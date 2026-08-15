@@ -113,6 +113,44 @@ func newClientMilestoneDetail(m *Milestone) ClientMilestoneDetail {
 	}
 }
 
+// ProjectDetail is the project payload for staff-role actors on the list and
+// detail reads. It mirrors the Project model and additionally carries the
+// agency-facing revision_limit (NULL = unlimited). Client-role actors receive
+// the plain Project payload, which never serializes the field; the approval
+// deep link keeps it absent as well.
+type ProjectDetail struct {
+	ID             uuid.UUID       `json:"id"`
+	OrganizationID uuid.UUID       `json:"organization_id"`
+	CreatedBy      uuid.UUID       `json:"created_by"`
+	Name           string          `json:"name"`
+	Description    *string         `json:"description,omitempty"`
+	Status         ProjectStatus   `json:"status"`
+	Priority       ProjectPriority `json:"priority"`
+	DueDate        *time.Time      `json:"due_date,omitempty"`
+	ClientID       *uuid.UUID      `json:"client_id,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+	RevisionLimit  *int            `json:"revision_limit,omitempty"`
+}
+
+// newProjectDetail maps a project to the staff-scoped payload.
+func newProjectDetail(p *Project) ProjectDetail {
+	return ProjectDetail{
+		ID:             p.ID,
+		OrganizationID: p.OrganizationID,
+		CreatedBy:      p.CreatedBy,
+		Name:           p.Name,
+		Description:    p.Description,
+		Status:         p.Status,
+		Priority:       p.Priority,
+		DueDate:        p.DueDate,
+		ClientID:       p.ClientID,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      p.UpdatedAt,
+		RevisionLimit:  p.RevisionLimit,
+	}
+}
+
 // ApprovalView is the shared deep-link payload (the WhatsApp landing page).
 // limit_reached / revision_limit are deliberately absent.
 type ApprovalView struct {

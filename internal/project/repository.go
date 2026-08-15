@@ -64,7 +64,8 @@ func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID uu
 			due_date,
 			client_id,
 			created_at,
-			updated_at
+			updated_at,
+			revision_limit
 		FROM projects
 		WHERE organization_id = $1
 		ORDER BY created_at DESC
@@ -81,7 +82,7 @@ func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID uu
 	for rows.Next() {
 		var p Project
 
-		err := rows.Scan(&p.ID, &p.OrganizationID, &p.CreatedBy, &p.Name, &p.Description, &p.Status, &p.Priority, &p.DueDate, &p.ClientID, &p.CreatedAt, &p.UpdatedAt)
+		err := rows.Scan(&p.ID, &p.OrganizationID, &p.CreatedBy, &p.Name, &p.Description, &p.Status, &p.Priority, &p.DueDate, &p.ClientID, &p.CreatedAt, &p.UpdatedAt, &p.RevisionLimit)
 		if err != nil {
 			return nil, 0, err
 		}

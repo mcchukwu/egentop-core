@@ -13,9 +13,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/mcchukwu/egentop/internal/requestctx"
 	"github.com/mcchukwu/egentop/internal/validation"
 )
 
@@ -177,6 +179,137 @@ func TestRevisionLimitSettersHTTP(t *testing.T) {
 	}
 	if _, ok := clientRaw["limit_reached"]; ok {
 		t.Fatalf("client detail must NOT expose limit_reached after the setter ran; raw=%v", clientRaw)
+	}
+}
+
+// TestProjectRevisionLimitOnProjectPayloadsHTTP verifies that the project
+// list + detail payloads expose the stored project-level revision_limit as-is
+// for staff actors, while client-role actors never see it: client detail over
+// HTTP (project.view), and the client list endpoint is blocked at the RBAC
+// boundary (project.list is staff-only).
+func TestProjectRevisionLimitOnProjectPayloadsHTTP(t *testing.T) {
+	validation.Init()
+	db := integrationDB(t)
+	defer db.Close()
+
+	handler, _ := layer1HTTPHarness(t, db)
+	ctx := context.Background()
+
+	staffToken, orgID, staffID := registerStaffViaHTTP(t, handler, db)
+	clientID, oneTime := provisionClientViaHTTP(t, handler, staffToken, orgID)
+	var clientEmail string
+	if err := db.QueryRowContext(ctx, `SELECT email FROM users WHERE id = $1`, uuid.MustParse(clientID)).Scan(&clientEmail); err != nil {
+		t.Fatalf("resolve client email: %v", err)
+	}
+	clientToken := clientLoginAndRotate(t, handler, clientEmail, oneTime)
+
+	projectService := newTestService(db)
+	project, err := projectService.Create(ctx, uuid.MustParse(staffID), uuid.MustParse(orgID), CreateProjectRequest{Name: "Limit Project"})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	setProjectRevisionLimit(t, db, project.ID, 3)
+	parsedClientID := uuid.MustParse(clientID)
+	if _, err := projectService.AssignClient(ctx, uuid.MustParse(staffID), uuid.MustParse(orgID), project.ID, &parsedClientID); err != nil {
+		t.Fatalf("assign client: %v", err)
+	}
+
+	projectPath := "/v1/orgs/" + orgID + "/projects/" + project.ID.String()
+	listPath := "/v1/orgs/" + orgID + "/projects"
+
+	// --- Staff detail exposes the stored project limit as-is ---
+	rr, env := httpDo(t, handler, http.MethodGet, projectPath, staffToken, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("staff project detail status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(env.Data, &raw); err != nil {
+		t.Fatalf("decode staff detail: %v", err)
+	}
+	if raw["revision_limit"] != float64(3) {
+		t.Fatalf("staff detail revision_limit = %v, want 3; raw=%v", raw["revision_limit"], raw)
+	}
+
+	// --- Staff list exposes the stored project limit per item ---
+	rr, env = httpDo(t, handler, http.MethodGet, listPath, staffToken, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("staff list status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var listResp struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(env.Data, &listResp); err != nil {
+		t.Fatalf("decode staff list: %v", err)
+	}
+	if len(listResp.Items) != 1 {
+		t.Fatalf("staff list items = %d, want 1; items=%v", len(listResp.Items), listResp.Items)
+	}
+	if listResp.Items[0]["revision_limit"] != float64(3) {
+		t.Fatalf("staff list item revision_limit = %v, want 3; item=%v", listResp.Items[0]["revision_limit"], listResp.Items[0])
+	}
+
+	// --- Client detail hides the limit fields (project.view) ---
+	rr, env = httpDo(t, handler, http.MethodGet, projectPath, clientToken, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("client detail status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var clientRaw map[string]any
+	if err := json.Unmarshal(env.Data, &clientRaw); err != nil {
+		t.Fatalf("decode client detail: %v", err)
+	}
+	if _, ok := clientRaw["revision_limit"]; ok {
+		t.Fatalf("client detail must NOT expose revision_limit; raw=%v", clientRaw)
+	}
+
+	// --- Client list is blocked at the RBAC boundary (project.list is
+	// staff-only) ---
+	rr, env = httpDo(t, handler, http.MethodGet, listPath, clientToken, nil)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("client list status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestClientProjectListExcludesRevisionLimit drives the list handler directly
+// with a client role injected into the request context (bypassing RBAC) to
+// prove the handler itself excludes revision_limit from client-role list
+// responses — defense in depth behind the project.list permission boundary.
+func TestClientProjectListExcludesRevisionLimit(t *testing.T) {
+	validation.Init()
+	db := integrationDB(t)
+	defer db.Close()
+
+	svc := newTestService(db)
+	_, orgID, projectID, _ := seedProject(t, db)
+	setProjectRevisionLimit(t, db, projectID, 4)
+
+	handler := NewHandler(svc)
+	mux := http.NewServeMux()
+	mux.Handle("GET /v1/orgs/{orgID}/projects", http.HandlerFunc(handler.ListProjectsByOrganizationID))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/orgs/"+orgID.String()+"/projects", nil)
+	req = req.WithContext(requestctx.WithOrganizationID(req.Context(), orgID))
+	req = req.WithContext(requestctx.WithRole(req.Context(), "client"))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("client-role list status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var env apiEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v; body=%s", err, rr.Body.String())
+	}
+	var listResp struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(env.Data, &listResp); err != nil {
+		t.Fatalf("decode items: %v", err)
+	}
+	if len(listResp.Items) != 1 {
+		t.Fatalf("client-role list items = %d, want 1; items=%v", len(listResp.Items), listResp.Items)
+	}
+	if _, ok := listResp.Items[0]["revision_limit"]; ok {
+		t.Fatalf("client-role list item must NOT expose revision_limit; item=%v", listResp.Items[0])
 	}
 }
 

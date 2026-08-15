@@ -36,10 +36,11 @@ type Project struct {
 	ClientID       *uuid.UUID      `json:"client_id,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
 	UpdatedAt      time.Time       `json:"updated_at"`
-	// RevisionLimit is the project-level revision limit. It is NEVER serialized
-	// on the project payload: the effective limit surfaces only on milestone
-	// read responses (COALESCE(milestone, project)), and the client-facing
-	// surfaces must not see it.
+	// RevisionLimit is the project-level revision limit (NULL = unlimited). It
+	// is never serialized on the Project model itself: the client-facing
+	// surfaces (approval deep link, client-role list/detail payloads) must not
+	// see it. Staff-role list/detail payloads expose it via the
+	// ProjectDetail DTO.
 	RevisionLimit *int `json:"-"`
 }
 
