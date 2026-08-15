@@ -11,12 +11,9 @@
 
 ---
 
-## FE-O2 — Backend change: `revision_limit` on project payloads (from the frontend repo)
+## FE-O2 — Backend change: `revision_limit` on project payloads — **IMPLEMENTED 2026-08-15 (RESOLVED)**
 
-- **Question:** Approve returning `revision_limit` on project payloads (~30 min, Builder) so the frontend can display the project default without a workaround?
-- **Why it matters:** The frontend project detail screen shows the project revision limit; without the payload field, the UI must approximate via milestone `COALESCE` values + local state (can lie when no milestones exist).
-- **Current understanding:** Architect-recommended; frontend ships either way (contained fallback).
-- **Information needed:** Founder approval. See frontend repo `.captain/OPEN_QUESTIONS.md` FE-O2.
+- **Resolution:** Founder approved 2026-08-15; implemented by Builder in commit `42d0875`. Project list + detail now expose `revision_limit` for staff actors (stored value as-is, NULL omitted); client-role actors never see it (detail hides via handler role split; list is RBAC staff-only with a direct-handler test proving the exclusion — defense in depth). 136/136 tests (was 134). No further action.
 
 ---
 
@@ -118,5 +115,5 @@
 - **Q2 — Competitive wedge** — RESOLVED 2026-08-14: **Reframed wedge approved by founder.** Wedge = milestone-level sign-off → revision limits → invoicing → payment status for 2–20 person agencies, especially with African payment rails. Layer-1 is designed around this.
 - **Q12 — Revision-limit semantics** — RESOLVED 2026-08-14: **Track + flag, no hard cap.** `revision_count` + `milestone_revisions` history + configurable per-project/milestone limit; `limit_reached` flag surfaces over-revision to the agency without blocking the client approval path.
 - **Q13 — Payment status scope** — RESOLVED 2026-08-14: **Per-milestone status** (unpaid/partial/paid), agency-updated, display-only, no money movement; visible on the client approval view.
-- **Q5 — Frontend decision** — RESOLVED 2026-08-14: **API-first validation before any frontend**; frontend deferred until validation signals justify the build.
+- **Q5 — Frontend decision** — SUPERSEDED 2026-08-14 (see DECISIONS.md): the API-first-only stance was replaced the same day by "minimal frontend now, build before validation" — agencies cannot operate a raw API.
 - **Q6 — Founder availability** — RESOLVED 2026-08-14: available every day / on-call via the Captain session; engineering capacity is agent-assisted.

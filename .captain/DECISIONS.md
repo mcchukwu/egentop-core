@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-08-15 — Founder sign-offs: FE-O1/FE-O2/FE-O3; deployment region confirmed; backend completeness re-confirmed
+
+**Decision:** Founder approved all frontend-repo gates and the validation deployment plan:
+
+1. **FE-O1 APPROVED** — hosting plan `app.egentop.com` (Cloudflare Pages) + `api.egentop.com` (VPS) confirmed; locks the auth/cookie design and `CORS_ALLOWED_ORIGINS=https://app.egentop.com` at deploy.
+2. **FE-O2 APPROVED** — the ~30-min backend change is authorized: return `revision_limit` on project payloads (Builder, backend repo; handoff prepared in session).
+3. **FE-O3 DECIDED (Captain, on founder delegation)** — `PATCH /v1/me` + `logout-all` stay excluded from the minimal frontend. Reasoning: a profile-edit screen produces zero validation signal for the wedge (milestone sign-off → revision control → payment status); single logout is the product surface; logout-all is a post-launch account-hygiene utility and is dangerous UX on the one-session client page. Both are cheap to add later. Completeness contract remains 45/50.
+4. **Deployment region confirmed** — London/Frankfurt for WA latency; concrete provider to be determined by DevOps within the ~$5–10/mo budget; deploy per `docs/deployment.md` runbook + smoke checklist.
+5. **Backend completeness re-confirmed** — nothing else is required before validation. Email verification (dormant by design, flag/gate removed 2026-08-13), password reset + staff invitation loop (deferred until email delivery is bought), and phone verification are deliberately deferred past validation: client onboarding runs on one-time credentials shared over WhatsApp (Q11a), so no email path is on the validation critical path. Deploy-time ops items are tracked for DevOps: CORS env, fresh JWT secret, DB lockdown, TLS, Secure cookies, retention cron install, nginx body-limit comment fix, XFF sanitization (nginx half). Queued engineering follow-ups that do NOT block validation: deterministic membership-lock ordering (residual swap deadlock), test-fixture-leak housekeeping.
+
+**Context:** Founder decision session 2026-08-15 (session resumed as Captain). The founder's question "is anything else needed on the backend?" was answered with the complete deferred/deploy-time inventory.
+
+**Consequences:** Next: Builder implements FE-O2 in this repo → frontend build session in `egentop-frontend` → deploy frontend + API + CORS env + smoke → real-device WhatsApp session test (FE-O4) → validation with 1–2 friendly agencies.
+
+---
+
 ## 2026-08-14 — Frontend approved: separate codebase, initialized; Q5's "API-first validation" superseded
 
 **Decision:** Build the minimal frontend NOW, in a separate codebase at `/home/miracle/projects/egentop-frontend` (initialized 2026-08-14: requirements, stack research, architecture, diagrams, `.captain/` memory — see that repo). This **supersedes Q5's "API-first validation before any frontend"**: the founder correctly identified that agencies cannot operate a raw API and the backend's client deep link returns JSON, not a rendered page — some interface is on the critical path to validation. The backend itself is unchanged and remains validation-ready.

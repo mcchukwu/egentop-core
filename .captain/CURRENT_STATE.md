@@ -36,15 +36,14 @@
 
 ## Currently Being Worked On
 
-- **Frontend (M3) — APPROVED + initialized 2026-08-14** in a separate codebase (`/home/miracle/projects/egentop-frontend`): requirements, stack research, architecture, diagrams, and `.captain/` memory are done and committed. Build session is next (this repo's backend is the API contract — unchanged).
-- **Awaiting founder sign-offs (frontend repo FE-O1/FE-O2/FE-O3):** domain/hosting plan (`app.egentop.com` + `api.egentop.com`), the ~30-min `revision_limit`-on-project-payload backend change, and scope exclusions.
+- **Frontend (M3) — APPROVED + initialized 2026-08-14; stack locked 2026-08-15 (FE-O6: Svelte 5 + SvelteKit 2).** Sign-offs FE-O1/FE-O2/FE-O3 complete; FE-O2 backend change DONE (`42d0875`); architecture docs refreshed (`7ae5096`). Next: Planner decomposition → build session in `egentop-frontend` (this repo's backend is the API contract — unchanged).
 - **Not in progress:** email delivery + invitation loop + password reset (deferred past MVP); validation deployment of the backend alone is no longer the gating path — the frontend deploys alongside it.
 
 ## Partially Implemented
 
 - **Invitation flow** — invite-by-email creates a membership with status `invited`, but there is **no accept/decline flow** and **no email delivery**. (Client provisioning does NOT use the invite flow — it provisions directly with a one-time credential.)
 - **`email_verified` / `phone_verified`** columns exist in schema, are returned in profiles, but have no flow to set them true (dormant by design)
-- **`revision_limit`** — schema + read-side + **write-side are fully wired (2026-08-14)**; effective limit = COALESCE(milestone, project), NULL = unlimited
+- **`revision_limit`** — schema + read/write **and project-payload exposure fully wired (2026-08-15, `42d0875`)**; effective limit = COALESCE(milestone, project), NULL = unlimited
 - **`authz_decisions` cleanup** — SQL + cron artifacts exist (`deploy/cron/`), but the cron is only installed at deploy time
 
 ## Known Problems
@@ -82,7 +81,7 @@ The structural-debt statement (2026-08-13 audit) is fully resolved, and the reli
 3. ~~**Layer-1 delta** — product requirements → architecture → migration → plan → build → test + review + security~~ — **DONE 2026-08-14** (backend complete; 93 integration tests; all verifier findings resolved)
 4. ~~**Q5/Q6 decisions** — API-first validation before frontend; founder available daily~~ — **DONE 2026-08-14; Q5 SUPERSEDED same day** (frontend approved — see DECISIONS.md)
 5. ~~**Small follow-ups + reliability pass** — revision_limit setter, client removal, security hardening, race fix, CI gate, deployment artifacts~~ — **DONE 2026-08-14** (commits `b536853`/`9606e7b`/`817c0c1`/`f3d0230`; 134/134 tests; Reviewer APPROVED)
-6. **Frontend sign-offs (founder):** FE-O1 domain/hosting (`app.egentop.com` + `api.egentop.com`), FE-O2 `revision_limit` backend change (~30 min), FE-O3 scope exclusions
+6. **~~Frontend sign-offs (founder)~~ — DONE 2026-08-15** (FE-O1 domain/hosting, FE-O2 `revision_limit` backend change — implemented `42d0875` — FE-O3 scope exclusions; stack locked FE-O6)
 7. **Frontend build (NEXT, in `egentop-frontend`):** scaffold + shared core → agency workspace → client approval page → deploy to Cloudflare Pages + CORS env + smoke → real-device WhatsApp test
 8. **Validation run** with 1–2 friendly agencies; feed signals into pricing (Q4), distribution (Q3), and the product
 9. **Email delivery** (buy: Resend/SES/Postmark class) + invitation loop + password reset — wedge-independent, deferred past MVP

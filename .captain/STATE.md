@@ -1,7 +1,7 @@
 # Egentop — Captain State Briefing
 
 > Concise current briefing. Snapshot, not canonical truth. Canonical detail lives in the other .captain/ files.
-> Last updated: 2026-08-14 (reliability pass complete)
+> Last updated: 2026-08-15 (FE-O2 implemented; frontend build next)
 
 ## Current Objective
 
@@ -15,7 +15,7 @@ Post-MVP backend → **API-first validation**. Layer-1 delta + **reliability pas
 
 - **Frontend (M3) — APPROVED + initialized 2026-08-14** in a separate codebase at `/home/miracle/projects/egentop-frontend`: requirements, stack research, architecture, diagrams, `.captain/` memory all done + committed. Q5 ("API-first validation before any frontend") **superseded the same day** — the founder correctly identified agencies can't operate a raw API (see DECISIONS.md).
 - **Backend: complete and validation-ready** — no further backend engineering required before validation (134/134, CI-gated, race-free, reviewed).
-- **Awaiting founder sign-offs:** FE-O1 (domain/hosting: `app.egentop.com` + `api.egentop.com`), FE-O2 (~30-min backend change: `revision_limit` on project payloads), FE-O3 (scope exclusions).
+- **FE-O2 DONE (2026-08-15, commit `42d0875`)** — `revision_limit` now on project list/detail payloads for staff actors; client surfaces exclude it (handler role split + direct-handler test, defense in depth). 136/136 tests (was 134). Sign-offs FE-O1/FE-O2/FE-O3 complete; deployment region (London/Frankfurt) confirmed; provider pending DevOps.
 
 ## Current Priorities
 
@@ -27,8 +27,8 @@ Post-MVP backend → **API-first validation**. Layer-1 delta + **reliability pas
 
 ## Current Blockers
 
-- **None technical.** 134/134 tests, race-free, CI gated, review-approved.
-- Founder sign-offs needed: FE-O1 (domain/hosting), FE-O2 (revision_limit backend change), FE-O3 (scope exclusions) — then the frontend build starts.
+- **None technical.** 134→136/136 tests, CI-gated, review-approved.
+- All founder sign-offs complete (2026-08-15); FE-O2 landed. Next gate: Planner decomposition → frontend build session.
 
 ## Important Risks
 
@@ -51,7 +51,7 @@ Post-MVP backend → **API-first validation**. Layer-1 delta + **reliability pas
 
 ## Next Recommended Action
 
-Founder signs off FE-O1/FE-O2/FE-O3 (frontend repo) → approve the small `revision_limit` backend change → start the frontend build session in `/home/miracle/projects/egentop-frontend` (scaffold + shared core → agency workspace → client page → deploy + CORS + smoke → real-device WhatsApp test) → run validation with 1–2 friendly agencies.
+FE-O2 DONE (`42d0875`). Next: Planner decomposes the frontend build in `/home/miracle/projects/egentop-frontend` (stack locked: Svelte 5 + SvelteKit 2 — FE-O6) → Builder executes phases → deploy frontend + API + CORS env + smoke (DevOps; region London/Frankfurt) → real-device WhatsApp session test → run validation with 1–2 friendly agencies. Backend requires no further engineering before validation.
 
 ## Recent Changes
 
