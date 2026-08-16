@@ -711,7 +711,7 @@ Errors: `400` `validation_error` / `invalid_status_transition` /
 `invalid_project_priority`, `404` `project_not_found`.
 
 ### DELETE /v1/orgs/{orgID}/projects/{projectID}
-Soft-deletes a project. Permission: `project.update` (owner).
+Soft-deletes a project. Permission: `project.update` (owner, admin — granted to admin by migration 000003; see the RBAC matrix).
 
 **Soft delete (§14.1):** the project row is preserved with `deleted_at` set,
 so the audit trail and the org activity feed keep the project's history. The
@@ -772,7 +772,7 @@ Errors: `400` `validation_error` / `invalid_status_transition`, `404`
 
 ### PATCH /v1/orgs/{orgID}/projects/{projectID}/revision-limit
 Sets or clears the project-level revision limit (the default every milestone
-falls back to). Permission: `project.update` (owner). Agency-only —
+falls back to). Permission: `project.update` (owner, admin — granted to admin by migration 000003; see the RBAC matrix). Agency-only —
 the limit fields never appear on client-facing surfaces.
 
 Request body:
