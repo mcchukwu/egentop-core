@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/mcchukwu/egentop/internal/activity"
@@ -209,5 +210,86 @@ func TestAssignmentListHTTPAllowsValidEmptyProject(t *testing.T) {
 	rr := doAssignmentRequest(t, handler, http.MethodGet, path, s.UserID, nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// assignmentDetailPayload mirrors the assignment detail JSON envelope.
+type assignmentDetailPayload struct {
+	Data struct {
+		AssigneeName   *string   `json:"assignee_name"`
+		AssignedByName *string   `json:"assigned_by_name"`
+		CreatedAt      time.Time `json:"created_at"`
+	} `json:"data"`
+}
+
+// assignmentListPayload mirrors the paginated assignment list JSON envelope.
+type assignmentListPayload struct {
+	Data struct {
+		Items []struct {
+			AssigneeName   *string   `json:"assignee_name"`
+			AssignedByName *string   `json:"assigned_by_name"`
+			CreatedAt      time.Time `json:"created_at"`
+		} `json:"items"`
+	} `json:"data"`
+}
+
+// TestAssignmentHTTPPayloadCarriesNamesAndCreatedAt: the assignment detail
+// and list responses the frontend renders carry assignee_name,
+// assigned_by_name, and a real (non-zero) created_at.
+func TestAssignmentHTTPPayloadCarriesNamesAndCreatedAt(t *testing.T) {
+	validation.Init()
+	db := integrationDB(t)
+	defer db.Close()
+
+	s := seedOrg(t, db, uuid.NewString())
+	service := newAssignmentHTTPService(db)
+	assignment, err := service.Create(t.Context(), s.OrgID, s.UserID, s.ProjectID, s.Milestone, s.MemberID)
+	if err != nil {
+		t.Fatalf("create assignment: %v", err)
+	}
+
+	handler := assignmentHandler(db, service)
+	base := "/v1/orgs/" + s.OrgID.String() + "/projects/" + s.ProjectID.String() + "/assignments"
+
+	// Detail payload.
+	rr := doAssignmentRequest(t, handler, http.MethodGet, base+"/"+assignment.ID.String(), s.UserID, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var detail assignmentDetailPayload
+	if err := json.Unmarshal(rr.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode detail: %v; body=%s", err, rr.Body.String())
+	}
+	if detail.Data.AssigneeName == nil || *detail.Data.AssigneeName != "Member User" {
+		t.Fatalf("detail assignee_name = %v, want %q", detail.Data.AssigneeName, "Member User")
+	}
+	if detail.Data.AssignedByName == nil || *detail.Data.AssignedByName != "Test User" {
+		t.Fatalf("detail assigned_by_name = %v, want %q", detail.Data.AssignedByName, "Test User")
+	}
+	if detail.Data.CreatedAt.IsZero() {
+		t.Fatalf("detail created_at = %v, want non-zero", detail.Data.CreatedAt)
+	}
+
+	// List payload.
+	rr = doAssignmentRequest(t, handler, http.MethodGet, base, s.UserID, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var list assignmentListPayload
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v; body=%s", err, rr.Body.String())
+	}
+	if len(list.Data.Items) != 1 {
+		t.Fatalf("list items = %d, want 1; body=%s", len(list.Data.Items), rr.Body.String())
+	}
+	item := list.Data.Items[0]
+	if item.AssigneeName == nil || *item.AssigneeName != "Member User" {
+		t.Fatalf("list assignee_name = %v, want %q", item.AssigneeName, "Member User")
+	}
+	if item.AssignedByName == nil || *item.AssignedByName != "Test User" {
+		t.Fatalf("list assigned_by_name = %v, want %q", item.AssignedByName, "Test User")
+	}
+	if item.CreatedAt.IsZero() {
+		t.Fatalf("list created_at = %v, want non-zero", item.CreatedAt)
 	}
 }

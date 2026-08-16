@@ -20,7 +20,10 @@ func NewRepository(db *sql.DB) *Repository {
 	}
 }
 
-// Create creates a new assignment
+// Create creates a new assignment. created_at is intentionally not part of
+// the INSERT: passing the struct's zero time.Time would override the column's
+// DEFAULT NOW() and store (and return) year-1 timestamps. The DB default
+// applies and RETURNING created_at returns the real value.
 func (r *Repository) Create(ctx context.Context, tx *sql.Tx, assignment *Assignment) error {
 	query := `
 		INSERT INTO assignments (
@@ -28,14 +31,13 @@ func (r *Repository) Create(ctx context.Context, tx *sql.Tx, assignment *Assignm
 			project_id,
 			milestone_id,
 			assigned_to,
-			assigned_by,
-			created_at
+			assigned_by
 		)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, created_at
 	`
 
-	err := tx.QueryRowContext(ctx, query, assignment.OrganizationID, assignment.ProjectID, assignment.MilestoneID, assignment.AssignedTo, assignment.AssignedBy, assignment.CreatedAt).Scan(&assignment.ID, &assignment.CreatedAt)
+	err := tx.QueryRowContext(ctx, query, assignment.OrganizationID, assignment.ProjectID, assignment.MilestoneID, assignment.AssignedTo, assignment.AssignedBy).Scan(&assignment.ID, &assignment.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -43,30 +45,44 @@ func (r *Repository) Create(ctx context.Context, tx *sql.Tx, assignment *Assignm
 	return nil
 }
 
-// GetByID returns an assignment by ID scoped to an organization
+// GetByID returns an assignment by ID scoped to an organization. The
+// assignee and assigning-user display names are resolved by users joins.
 func (r *Repository) GetByIDAndProjectIDAndOrganizationID(ctx context.Context, tx *sql.Tx, orgID uuid.UUID, projectID uuid.UUID, assignmentID uuid.UUID, assignment *Assignment) error {
 	query := `
 		SELECT
-			id,
-			organization_id,
-			project_id,
-			milestone_id,
-			assigned_to,
-			assigned_by,
-			created_at
-		FROM assignments
-		WHERE id = $1
-		AND organization_id = $2
-		AND project_id = $3
+			a.id,
+			a.organization_id,
+			a.project_id,
+			a.milestone_id,
+			a.assigned_to,
+			a.assigned_by,
+			a.created_at,
+			u.first_name || ' ' || u.last_name AS assignee_name,
+			u2.first_name || ' ' || u2.last_name AS assigned_by_name
+		FROM assignments a
+		LEFT JOIN users u ON u.id = a.assigned_to
+		LEFT JOIN users u2 ON u2.id = a.assigned_by
+		WHERE a.id = $1
+		AND a.organization_id = $2
+		AND a.project_id = $3
 	`
 
-	err := tx.QueryRowContext(ctx, query, assignmentID, orgID, projectID).Scan(&assignment.ID, &assignment.OrganizationID, &assignment.ProjectID, &assignment.MilestoneID, &assignment.AssignedTo, &assignment.AssignedBy, &assignment.CreatedAt)
+	var assigneeName, assignedByName sql.NullString
+
+	err := tx.QueryRowContext(ctx, query, assignmentID, orgID, projectID).Scan(&assignment.ID, &assignment.OrganizationID, &assignment.ProjectID, &assignment.MilestoneID, &assignment.AssignedTo, &assignment.AssignedBy, &assignment.CreatedAt, &assigneeName, &assignedByName)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return apperrors.ErrAssignmentNotFound
 		}
 
 		return err
+	}
+
+	if assigneeName.Valid {
+		assignment.AssigneeName = &assigneeName.String
+	}
+	if assignedByName.Valid {
+		assignment.AssignedByName = &assignedByName.String
 	}
 
 	return nil
@@ -90,17 +106,21 @@ func (r *Repository) ListByProjectID(ctx context.Context, orgID uuid.UUID, proje
 
 	query := `
 		SELECT
-			id,
-			organization_id,
-			project_id,
-			milestone_id,
-			assigned_to,
-			assigned_by,
-			created_at
-		FROM assignments
-		WHERE organization_id = $1
-		AND project_id = $2
-		ORDER BY created_at DESC
+			a.id,
+			a.organization_id,
+			a.project_id,
+			a.milestone_id,
+			a.assigned_to,
+			a.assigned_by,
+			a.created_at,
+			u.first_name || ' ' || u.last_name AS assignee_name,
+			u2.first_name || ' ' || u2.last_name AS assigned_by_name
+		FROM assignments a
+		LEFT JOIN users u ON u.id = a.assigned_to
+		LEFT JOIN users u2 ON u2.id = a.assigned_by
+		WHERE a.organization_id = $1
+		AND a.project_id = $2
+		ORDER BY a.created_at DESC
 		LIMIT $3 OFFSET $4
 	`
 
@@ -113,10 +133,18 @@ func (r *Repository) ListByProjectID(ctx context.Context, orgID uuid.UUID, proje
 
 	for rows.Next() {
 		var a Assignment
+		var assigneeName, assignedByName sql.NullString
 
-		err := rows.Scan(&a.ID, &a.OrganizationID, &a.ProjectID, &a.MilestoneID, &a.AssignedTo, &a.AssignedBy, &a.CreatedAt)
+		err := rows.Scan(&a.ID, &a.OrganizationID, &a.ProjectID, &a.MilestoneID, &a.AssignedTo, &a.AssignedBy, &a.CreatedAt, &assigneeName, &assignedByName)
 		if err != nil {
 			return nil, 0, err
+		}
+
+		if assigneeName.Valid {
+			a.AssigneeName = &assigneeName.String
+		}
+		if assignedByName.Valid {
+			a.AssignedByName = &assignedByName.String
 		}
 
 		assignments = append(assignments, a)

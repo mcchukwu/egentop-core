@@ -172,6 +172,66 @@ func TestAssignmentCreateAndViewScopedToOrg(t *testing.T) {
 	}
 }
 
+// TestAssignmentPayloadCarriesNamesAndCreatedAt: list and detail payloads
+// resolve the assignee and assigning-user display names via a users join,
+// and created_at carries the real timestamp (never Go's zero time).
+func TestAssignmentPayloadCarriesNamesAndCreatedAt(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	s := seedOrg(t, db, uuid.NewString())
+
+	assignment, err := svc.Create(ctx, s.OrgID, s.UserID, s.ProjectID, s.Milestone, s.MemberID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if assignment.CreatedAt.IsZero() {
+		t.Fatal("created_at is zero after Create (DB default was overridden)")
+	}
+
+	detail, err := svc.GetByID(ctx, s.OrgID, s.ProjectID, assignment.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if detail.AssigneeName == nil || *detail.AssigneeName != "Member User" {
+		t.Fatalf("detail assignee_name = %v, want %q", nameOrNil(detail.AssigneeName), "Member User")
+	}
+	if detail.AssignedByName == nil || *detail.AssignedByName != "Test User" {
+		t.Fatalf("detail assigned_by_name = %v, want %q", nameOrNil(detail.AssignedByName), "Test User")
+	}
+	if detail.CreatedAt.IsZero() {
+		t.Fatal("detail created_at is zero")
+	}
+
+	assignments, _, err := svc.ListByProjectID(ctx, s.OrgID, s.ProjectID, pagination.Query{Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListByProjectID: %v", err)
+	}
+	if len(assignments) != 1 {
+		t.Fatalf("expected 1 assignment, got %d", len(assignments))
+	}
+	listed := assignments[0]
+	if listed.AssigneeName == nil || *listed.AssigneeName != "Member User" {
+		t.Fatalf("list assignee_name = %v, want %q", nameOrNil(listed.AssigneeName), "Member User")
+	}
+	if listed.AssignedByName == nil || *listed.AssignedByName != "Test User" {
+		t.Fatalf("list assigned_by_name = %v, want %q", nameOrNil(listed.AssignedByName), "Test User")
+	}
+	if listed.CreatedAt.IsZero() {
+		t.Fatal("list created_at is zero")
+	}
+}
+
+func nameOrNil(name *string) string {
+	if name == nil {
+		return "<nil>"
+	}
+	return *name
+}
+
 func TestAssignmentListUpdateDelete(t *testing.T) {
 	db := integrationDB(t)
 	defer db.Close()

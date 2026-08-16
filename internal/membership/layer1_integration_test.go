@@ -48,6 +48,53 @@ func TestMemberListExcludesClients(t *testing.T) {
 	}
 }
 
+// TestMemberListEnrichesNames: the member roster payload carries each
+// member's display name ("{first_name} {last_name}"), resolved by a users
+// join at read time — the frontend renders names instead of raw user IDs.
+func TestMemberListEnrichesNames(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := NewService(db, audit.NewService(db))
+
+	ownerID, orgID := seedOwnerMembership(t, db, "names-owner-"+uuid.NewString()+"@example.com")
+
+	// A member with a distinct name proves the join concatenates the actual
+	// first/last columns rather than echoing the seed helper defaults.
+	var namedID uuid.UUID
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO users (email, password_hash, first_name, last_name)
+		VALUES ($1, 'hash', 'Chiamaka', 'Okafor')
+		RETURNING id
+	`, "names-member-"+uuid.NewString()+"@example.com").Scan(&namedID); err != nil {
+		t.Fatalf("insert named member: %v", err)
+	}
+	seedMembershipRole(t, db, namedID, orgID, RoleMember)
+
+	members, meta, err := svc.GetOrgMembers(ctx, orgID, pagination.Query{Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("GetOrgMembers: %v", err)
+	}
+	if meta.Total != 2 {
+		t.Fatalf("member list total = %d, want 2", meta.Total)
+	}
+
+	names := make(map[uuid.UUID]string, len(members))
+	for _, m := range members {
+		if m.MemberName == nil {
+			t.Fatalf("member %s has nil member_name (expected %q)", m.UserID, "Test User")
+		}
+		names[m.UserID] = *m.MemberName
+	}
+	if names[ownerID] != "Test User" {
+		t.Fatalf("owner member_name = %q, want %q", names[ownerID], "Test User")
+	}
+	if names[namedID] != "Chiamaka Okafor" {
+		t.Fatalf("named member member_name = %q, want %q", names[namedID], "Chiamaka Okafor")
+	}
+}
+
 // TestRoleUpdateRejectsClientRole: the client role cannot be granted through
 // member.role.update (provisioning is the only path), which also blocks
 // escalating client memberships to staff roles.

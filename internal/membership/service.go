@@ -235,9 +235,11 @@ func (s *Service) GetOrgMembers(ctx context.Context, orgID uuid.UUID, q paginati
 				m.role_id,
 				r.name AS role,
 				m.status,
-				m.joined_at
+				m.joined_at,
+				u.first_name || ' ' || u.last_name AS member_name
 			FROM memberships m
 			JOIN roles r ON r.id = m.role_id
+			LEFT JOIN users u ON u.id = m.user_id
 			WHERE m.organization_id = $1
 			AND r.name <> 'client'
 			ORDER BY m.joined_at DESC
@@ -251,10 +253,15 @@ func (s *Service) GetOrgMembers(ctx context.Context, orgID uuid.UUID, q paginati
 
 		for rows.Next() {
 			var m Membership
+			var memberName sql.NullString
 
-			err := rows.Scan(&m.ID, &m.UserID, &m.OrganizationID, &m.RoleID, &m.Role, &m.Status, &m.JoinedAt)
+			err := rows.Scan(&m.ID, &m.UserID, &m.OrganizationID, &m.RoleID, &m.Role, &m.Status, &m.JoinedAt, &memberName)
 			if err != nil {
 				return apperrors.ErrInternalServer
+			}
+
+			if memberName.Valid {
+				m.MemberName = &memberName.String
 			}
 
 			members = append(members, m)

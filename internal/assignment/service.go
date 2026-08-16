@@ -171,6 +171,10 @@ func (s *Service) Update(ctx context.Context, orgID uuid.UUID, userID uuid.UUID,
 
 		oldAssignedTo := assignment.AssignedTo
 		assignment.AssignedTo = assignedTo
+		// The read above resolved the previous assignee's display name; the
+		// new assignee's name is not known here, so drop the stale name
+		// rather than ship a mismatched assignee_name in the response.
+		assignment.AssigneeName = nil
 
 		if err := s.AuditServie.Log(dbCtx, tx, audit.LogEntry{
 			OrganizationID: &orgID,

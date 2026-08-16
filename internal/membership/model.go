@@ -32,4 +32,10 @@ type Membership struct {
 	Role           Role             `json:"role"`
 	Status         MembershipStatus `json:"status"`
 	JoinedAt       time.Time        `json:"joined_at"`
+	// MemberName is the member's display name ("{first_name} {last_name}"),
+	// resolved by a users join at read time (same pattern as activity
+	// actor_name). Nil when the user row does not resolve (defensive —
+	// memberships reference users via FK and users are never hard-deleted).
+	// user_id is retained; the UI renders the name separately.
+	MemberName *string `json:"member_name,omitempty"`
 }

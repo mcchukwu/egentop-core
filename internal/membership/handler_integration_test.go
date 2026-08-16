@@ -3,6 +3,7 @@ package membership
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -68,5 +69,59 @@ func TestOwnerRoleEscalationThroughHTTPRoute(t *testing.T) {
 	}
 	if role != string(RoleOwner) {
 		t.Fatalf("target role = %q, want owner", role)
+	}
+}
+
+// memberListHandler mirrors the production member list route chain after
+// authentication (org access + member.list permission).
+func memberListHandler(db *sql.DB, service *Service) http.Handler {
+	h := NewHandler(service)
+	org := middleware.NewOrgMiddleware(db)
+	access := middleware.NewOrgAccessMiddleware(db)
+	rbac := middleware.NewRBACMiddleware(db)
+
+	mux := http.NewServeMux()
+	mux.Handle("GET /v1/orgs/{orgID}/members", org.LoadOrg(access.RequireMembership(rbac.RequirePermission("member.list")(http.HandlerFunc(h.GetOrgMembers)))))
+	return mux
+}
+
+// TestMemberListHTTPPayloadCarriesNames: the member roster JSON the frontend
+// renders carries each member's display name (member_name), not raw user IDs.
+func TestMemberListHTTPPayloadCarriesNames(t *testing.T) {
+	validation.Init()
+	db := integrationDB(t)
+	defer db.Close()
+
+	ownerID, orgID := seedOwnerMembership(t, db, "http-names-owner-"+uuid.NewString()+"@example.com")
+	memberID := seedUser(t, db, "http-names-member-"+uuid.NewString()+"@example.com")
+	seedMembershipRole(t, db, memberID, orgID, RoleMember)
+
+	handler := memberListHandler(db, NewService(db, audit.NewService(db)))
+	req := httptest.NewRequest(http.MethodGet, "/v1/orgs/"+orgID.String()+"/members", nil)
+	req = req.WithContext(requestctx.WithUserID(req.Context(), ownerID))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data struct {
+			Items []struct {
+				UserID     string  `json:"user_id"`
+				MemberName *string `json:"member_name"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode member list: %v; body=%s", err, rr.Body.String())
+	}
+	if len(payload.Data.Items) != 2 {
+		t.Fatalf("items = %d, want 2; body=%s", len(payload.Data.Items), rr.Body.String())
+	}
+	for _, item := range payload.Data.Items {
+		if item.MemberName == nil || *item.MemberName == "" {
+			t.Fatalf("member %s has no member_name in payload", item.UserID)
+		}
 	}
 }

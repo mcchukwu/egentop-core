@@ -367,6 +367,10 @@ Response `200` with the updated organization (same shape as `GET /v1/orgs/{orgID
 ### GET /v1/orgs/{orgID}/members
 Lists members of an organization. Permission: `member.list`. Paginated.
 
+Each item carries **`member_name`** — the member's display name
+(`"{first_name} {last_name}"`), resolved by a users join at read time; the UI
+renders names instead of raw user IDs. `user_id` is retained.
+
 Response `200`:
 
 ```json
@@ -379,7 +383,8 @@ Response `200`:
       "role_id": "uuid",
       "role": "member",
       "status": "active",
-      "joined_at": "2026-08-11T10:00:00Z"
+      "joined_at": "2026-08-11T10:00:00Z",
+      "member_name": "Chiamaka Okafor"
     }
   ],
   "pagination": { "page": 1, "limit": 20, "total": 1 }
@@ -1203,6 +1208,28 @@ Lists assignments for a project. Permission: `assignment.list`. Paginated.
 
 ### GET /v1/orgs/{orgID}/projects/{projectID}/assignments/{assignmentID}
 Returns a single assignment. Permission: `assignment.view`.
+
+List and detail payloads carry **`assignee_name`** and **`assigned_by_name`**
+— the assignee's and assigning user's display names (`"{first_name}
+{last_name}"`), resolved by users joins at read time; the UI renders names
+instead of raw user IDs. `assigned_to` / `assigned_by` are retained.
+`created_at` is the row's real creation timestamp (never a zero time).
+
+Response `200` (list item / detail `data`):
+
+```json
+{
+  "id": "uuid",
+  "organization_id": "uuid",
+  "project_id": "uuid",
+  "milestone_id": "uuid",
+  "assigned_to": "uuid",
+  "assigned_by": "uuid",
+  "assignee_name": "Member User",
+  "assigned_by_name": "Owner User",
+  "created_at": "2026-08-11T10:00:00Z"
+}
+```
 
 Errors: `404` `assignment_not_found` / `project_not_found` (missing,
 cross-org, or soft-deleted project).
