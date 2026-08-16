@@ -146,9 +146,9 @@ func (h *Handler) GetProjectByID(w http.ResponseWriter, r *http.Request) {
 
 // mapDueDatePastError converts the service's past-due-date sentinel into the
 // established validation_error contract (400 + fields.DueDate) and reports
-// whether it handled the error. Update paths run the rule in the service (after
-// the project/milestone row lock so 404/400 precedences hold), and this is the
-// handler-side mapping.
+// whether it handled the error. Create/update paths run the rule in the
+// service (after the project/milestone row lock so 404/400 precedences hold),
+// and this is the handler-side mapping.
 func mapDueDatePastError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, apperrors.ErrDueDateInPast) {
 		response.ValidationError(w, map[string]string{"DueDate": dueDateInPastMessage})
@@ -245,12 +245,6 @@ func (h *Handler) CreateMilestone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create-time past-due-date rule: reject before the service call.
-	if fields := dueDateFields(&req.DueDate); fields != nil {
-		response.ValidationError(w, fields)
-		return
-	}
-
 	userID, ok := requestctx.UserID(r.Context())
 	if !ok {
 		response.HandleError(w, apperrors.ErrUnauthorized)
@@ -271,6 +265,9 @@ func (h *Handler) CreateMilestone(w http.ResponseWriter, r *http.Request) {
 
 	milestone, err := h.Service.CreateMilestone(r.Context(), orgID, projectID, userID, req)
 	if err != nil {
+		if mapDueDatePastError(w, err) {
+			return
+		}
 		response.HandleError(w, err)
 		return
 	}

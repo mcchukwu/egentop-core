@@ -821,10 +821,14 @@ func TestRestoreTransitionMatrix(t *testing.T) {
 		t.Fatalf("draft -> active: %v", err)
 	}
 
-	// active -> active: no-op, allowed.
-	if _, err := svc.Update(ctx, ownerID, orgID, cancelledProject, UpdateProjectRequest{}); err == nil {
-		// empty PATCH is allowed but irrelevant; use a real active project.
+	// cancelled + empty PATCH -> 400 invalid_status_transition: the freeze
+	// guard runs before any payload processing, so even an empty PATCH is
+	// rejected on a frozen project (strict-freeze contract).
+	if _, err := svc.Update(ctx, ownerID, orgID, cancelledProject, UpdateProjectRequest{}); !errors.Is(err, apperrors.ErrInvalidStatusTransition) {
+		t.Fatalf("cancelled + empty PATCH error = %v, want ErrInvalidStatusTransition (freeze wins)", err)
 	}
+
+	// active -> active: no-op, allowed.
 	ownerID4, orgID4, activeProject, _ := seedProject(t, db)
 	if _, err := svc.Update(ctx, ownerID4, orgID4, activeProject, UpdateProjectRequest{Status: ProjectStatusActive}); err != nil {
 		t.Fatalf("active -> active: %v", err)

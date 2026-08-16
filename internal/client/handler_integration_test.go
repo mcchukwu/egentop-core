@@ -184,6 +184,96 @@ func TestRemoveAssignedClientHTTP(t *testing.T) {
 	}
 }
 
+// TestRemoveClientWithOnlyDeletedProjectHTTP (Reviewer M1 / Security note):
+// a client whose ONLY project was soft-deleted can be removed — deleted
+// projects no longer block the removal, so the stranded membership can be
+// cleaned up manually. A client attached to a LIVE project still 409s
+// (unchanged).
+func TestRemoveClientWithOnlyDeletedProjectHTTP(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	staffID, orgID := seedClientOrg(t, db)
+
+	provisioned, err := svc.Provision(ctx, staffID, orgID, ProvisionRequest{
+		Email:     "stranded-" + uuid.NewString() + "@example.com",
+		FirstName: "Stranded",
+		LastName:  "Client",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+
+	// Attach the client to a project, then soft-delete the project (direct
+	// SQL: the lifecycle DELETE sets deleted_at = NOW() and the row keeps
+	// client_id for the audit record).
+	var projectID uuid.UUID
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO projects (organization_id, created_by, name, status, client_id)
+		VALUES ($1, $2, 'Deleted Project', 'active', $3)
+		RETURNING id
+	`, orgID, staffID, provisioned.ClientID).Scan(&projectID); err != nil {
+		t.Fatalf("insert attached project: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE projects SET deleted_at = NOW() WHERE id = $1
+	`, projectID); err != nil {
+		t.Fatalf("soft-delete project: %v", err)
+	}
+
+	handler := clientRemoveHandler(db, svc)
+	rr := doClientRemoveRequest(t, handler, orgID, provisioned.ClientID, staffID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("remove status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var membershipCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*) FROM memberships WHERE user_id = $1 AND organization_id = $2
+	`, provisioned.ClientID, orgID).Scan(&membershipCount); err != nil {
+		t.Fatalf("count memberships: %v", err)
+	}
+	if membershipCount != 0 {
+		t.Fatalf("membership count = %d, want 0 (stranded membership cleaned up)", membershipCount)
+	}
+
+	var userCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*) FROM users WHERE id = $1
+	`, provisioned.ClientID).Scan(&userCount); err != nil {
+		t.Fatalf("count users: %v", err)
+	}
+	if userCount != 1 {
+		t.Fatalf("users row count = %d, want 1 (the user is never deleted)", userCount)
+	}
+
+	// Control: a client attached to a live project still cannot be removed.
+	liveClient, err := svc.Provision(ctx, staffID, orgID, ProvisionRequest{
+		Email:     "live-attached-" + uuid.NewString() + "@example.com",
+		FirstName: "Live",
+		LastName:  "Attached",
+	})
+	if err != nil {
+		t.Fatalf("provision live client: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO projects (organization_id, created_by, name, status, client_id)
+		VALUES ($1, $2, 'Live Project', 'active', $3)
+	`, orgID, staffID, liveClient.ClientID); err != nil {
+		t.Fatalf("insert live project: %v", err)
+	}
+	rr = doClientRemoveRequest(t, handler, orgID, liveClient.ClientID, staffID)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("live-attached remove status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := decodeClientHTTPError(t, rr).Error.Code; got != "client_attached_to_project" {
+		t.Fatalf("error code = %q, want client_attached_to_project", got)
+	}
+}
+
 // TestRemoveNonClientHTTP: a user who is not an active client of the org (and
 // an unknown user) resolves to 404 client_not_found.
 func TestRemoveNonClientHTTP(t *testing.T) {

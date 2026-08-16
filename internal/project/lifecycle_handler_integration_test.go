@@ -1,7 +1,8 @@
 package project
 
 // HTTP-contract tests for the project lifecycle slice: the due-date rule's
-// 400 validation_error shape (create paths run in the handler), the DELETE
+// 400 validation_error shape (project create runs in the handler; milestone
+// create runs in the service and is mapped in the handler), the DELETE
 // 200/403/404 contract, the include_cancelled list parameter, the restore
 // transition, and the freeze 400 on field edits.
 
@@ -241,6 +242,67 @@ func TestUpdateMilestoneDueDatePastValidation(t *testing.T) {
 	if fields := decodeValidationFields(t, rr); fields["DueDate"] != dueDateInPastMessage {
 		t.Fatalf("fields.DueDate = %q, want %q", fields["DueDate"], dueDateInPastMessage)
 	}
+}
+
+// TestMilestoneCreateDueDatePrecedence (Security finding, §14.2.1): the
+// past-due-date rule on milestone create runs after the project state lock,
+// so deleted/frozen projects resolve their own error first. Deleted -> 404
+// project_not_found; archived (frozen) -> 400 invalid_status_transition; a
+// live project still maps the past date to 400 validation_error
+// fields.DueDate.
+func TestMilestoneCreateDueDatePrecedence(t *testing.T) {
+	validation.Init()
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := t.Context()
+	svc := newTestService(db)
+	handler := lifecycleHandler(db, svc)
+
+	past := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
+	body := []byte(`{"title":"Past Milestone","due_date":"` + past + `"}`)
+
+	t.Run("deleted project past due_date 404", func(t *testing.T) {
+		ownerID, orgID, projectID, _ := seedProject(t, db)
+		if err := svc.Delete(ctx, ownerID, orgID, projectID); err != nil {
+			t.Fatalf("delete project: %v", err)
+		}
+		path := "/v1/orgs/" + orgID.String() + "/projects/" + projectID.String() + "/milestones"
+		rr := doLifecycleRequest(t, handler, http.MethodPost, path, ownerID, body)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("deleted + past due_date status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+		}
+		if code := decodeErrorCode(t, rr); code != "project_not_found" {
+			t.Fatalf("deleted + past due_date error = %s, want project_not_found", code)
+		}
+	})
+
+	t.Run("archived project past due_date freeze wins", func(t *testing.T) {
+		ownerID, orgID, projectID, _ := seedProject(t, db)
+		if _, err := svc.Update(ctx, ownerID, orgID, projectID, UpdateProjectRequest{Status: ProjectStatusArchived}); err != nil {
+			t.Fatalf("archive: %v", err)
+		}
+		path := "/v1/orgs/" + orgID.String() + "/projects/" + projectID.String() + "/milestones"
+		rr := doLifecycleRequest(t, handler, http.MethodPost, path, ownerID, body)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("archived + past due_date status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+		}
+		if code := decodeErrorCode(t, rr); code != "invalid_status_transition" {
+			t.Fatalf("archived + past due_date error = %s, want invalid_status_transition (freeze wins)", code)
+		}
+	})
+
+	t.Run("live project past due_date 400 validation_error", func(t *testing.T) {
+		ownerID, orgID, projectID, _ := seedProject(t, db)
+		path := "/v1/orgs/" + orgID.String() + "/projects/" + projectID.String() + "/milestones"
+		rr := doLifecycleRequest(t, handler, http.MethodPost, path, ownerID, body)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("live + past due_date status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+		}
+		if fields := decodeValidationFields(t, rr); fields["DueDate"] != dueDateInPastMessage {
+			t.Fatalf("fields.DueDate = %q, want %q", fields["DueDate"], dueDateInPastMessage)
+		}
+	})
 }
 
 // TestDeleteProjectHTTPContract (AC-DEL-4 + route contract): owner/admin

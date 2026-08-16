@@ -674,7 +674,10 @@ func (r *Repository) DeleteClientMembership(ctx context.Context, tx *sql.Tx, org
 }
 
 // IsClientOnAnyOtherProject reports whether the user is still the assigned
-// client of any other project in the organization.
+// client of any other live project in the organization. Soft-deleted projects
+// do not count: a displaced client whose remaining projects are all deleted
+// has no project reference left, so the prune removes the stranded
+// membership.
 func (r *Repository) IsClientOnAnyOtherProject(ctx context.Context, q Queryer, organizationID uuid.UUID, userID uuid.UUID, exceptProjectID uuid.UUID) (bool, error) {
 	var exists bool
 	err := q.QueryRowContext(ctx, `
@@ -683,6 +686,7 @@ func (r *Repository) IsClientOnAnyOtherProject(ctx context.Context, q Queryer, o
 			WHERE organization_id = $1
 			AND client_id = $2
 			AND id <> $3
+			AND deleted_at IS NULL
 		)
 	`, organizationID, userID, exceptProjectID).Scan(&exists)
 	if err != nil {

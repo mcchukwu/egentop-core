@@ -591,7 +591,7 @@ The target must hold an active `client` membership in the organization (else
   first and blocks the removal with 409, or the removal commits first and the
   assignment aborts with `404 client_not_found`).
 
-Response `200` (`data: null`).
+Response `200` with a success envelope (the `data` key is omitted when nil).
 
 Errors: `403` `forbidden` (actor lacks `client.provision`), `404`
 `client_not_found`, `409` `client_attached_to_project`.
@@ -711,7 +711,7 @@ Errors: `400` `validation_error` / `invalid_status_transition` /
 `invalid_project_priority`, `404` `project_not_found`.
 
 ### DELETE /v1/orgs/{orgID}/projects/{projectID}
-Soft-deletes a project. Permission: `project.update` (owner, admin).
+Soft-deletes a project. Permission: `project.update` (owner).
 
 **Soft delete (§14.1):** the project row is preserved with `deleted_at` set,
 so the audit trail and the org activity feed keep the project's history. The
@@ -726,18 +726,21 @@ non-goal this slice: deleted is final, history preserved.
 
 Request body: none.
 
-Response `200` with a success envelope and `data: null`:
+Response `200` with a success envelope (the `data` key is omitted when nil):
 
 ```json
 {
   "success": true,
-  "message": "project deleted",
-  "data": null
+  "message": "project deleted"
 }
 ```
 
-Errors: `403` `forbidden` (role without `project.update`, or a client),
-`404` `project_not_found` (missing, cross-org, or already deleted).
+Errors: `403` `forbidden` (role without `project.update`, a client, or an
+authenticated member of another org — org-scoped routes return `403` for a
+member of a different org: accepted deviation, consistent with the MEDIUM-4
+org-existence oracle; revisit pre-launch), `404` `project_not_found` (missing,
+another org's project reached through the actor's own org scope, or already
+deleted).
 
 ### PUT /v1/orgs/{orgID}/projects/{projectID}/client
 Assigns, reassigns, or unassigns the project's client. Permission:
@@ -769,7 +772,7 @@ Errors: `400` `validation_error` / `invalid_status_transition`, `404`
 
 ### PATCH /v1/orgs/{orgID}/projects/{projectID}/revision-limit
 Sets or clears the project-level revision limit (the default every milestone
-falls back to). Permission: `project.update` (owner, admin). Agency-only —
+falls back to). Permission: `project.update` (owner). Agency-only —
 the limit fields never appear on client-facing surfaces.
 
 Request body:
@@ -1034,7 +1037,7 @@ Removes a deliverable. Permission: `deliverable.submit`. Milestones in
 `completed` or `cancelled` state are frozen, and deliverables are also frozen
 on archived/cancelled **projects** (§14.1, AC-LC-5).
 
-Response `200` (`data: null`).
+Response `200` with a success envelope (the `data` key is omitted when nil).
 
 Errors: `400` `invalid_status_transition`, `404` `deliverable_not_found` /
 `milestone_not_found`.

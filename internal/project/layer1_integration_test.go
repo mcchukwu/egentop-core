@@ -798,6 +798,61 @@ func TestReassignmentAndUnassign(t *testing.T) {
 	}
 }
 
+// TestPruneIgnoresSoftDeletedProjects (Reviewer M1 / Security note): the
+// unassign/reassign prune only counts LIVE projects when deciding whether a
+// displaced client still holds another project. A soft-deleted project no
+// longer keeps the membership alive, so the stranded membership is pruned.
+// Live projects still block the prune (TestReassignKeepsClientOnOtherProjects
+// guards the unchanged case).
+func TestPruneIgnoresSoftDeletedProjects(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	ownerID, orgID, liveProject, _ := seedProject(t, db)
+	deletedProject, _ := seedAdditionalProject(t, db, orgID, ownerID)
+	clientID := seedClient(t, db, orgID)
+
+	// Client holds a live project and a (soon-deleted) second project.
+	assignClient(t, svc, ownerID, orgID, liveProject, clientID)
+	assignClient(t, svc, ownerID, orgID, deletedProject, clientID)
+	if err := svc.Delete(ctx, ownerID, orgID, deletedProject); err != nil {
+		t.Fatalf("delete second project: %v", err)
+	}
+
+	// Unassign from the live project: the deleted project must not count as
+	// "another project", so the prune removes the client's membership.
+	if _, err := svc.AssignClient(ctx, ownerID, orgID, liveProject, nil); err != nil {
+		t.Fatalf("unassign: %v", err)
+	}
+
+	var membershipCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*) FROM memberships WHERE user_id = $1 AND organization_id = $2
+	`, clientID, orgID).Scan(&membershipCount); err != nil {
+		t.Fatalf("count client memberships: %v", err)
+	}
+	if membershipCount != 0 {
+		t.Fatalf("client membership count = %d, want 0 (soft-deleted project must not block the prune)", membershipCount)
+	}
+
+	// The prune is audited explicitly.
+	var pruneAudits int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*) FROM audit_logs
+		WHERE action = 'membership.removed'
+		AND organization_id = $1
+		AND metadata->>'reason' = 'client no longer assigned to any project'
+	`, orgID).Scan(&pruneAudits); err != nil {
+		t.Fatalf("count prune audit rows: %v", err)
+	}
+	if pruneAudits != 1 {
+		t.Fatalf("prune audit rows = %d, want 1", pruneAudits)
+	}
+}
+
 // TestReassignKeepsClientOnOtherProjects: a displaced client who is still the
 // client of another project in the org keeps their membership.
 func TestReassignKeepsClientOnOtherProjects(t *testing.T) {

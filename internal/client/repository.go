@@ -248,8 +248,11 @@ func (r *Repository) LockClientMembership(ctx context.Context, q Queryer, orgID 
 }
 
 // ClientHasProjects reports whether the user is the assigned client of any
-// project in the organization. A client attached to a project cannot be
-// removed directly (the project reference would be stranded).
+// live project in the organization. Soft-deleted projects do not count: their
+// rows keep client_id only for the audit record, and a client whose only
+// projects are deleted must be removable (no stranded membership). A client
+// attached to a live project cannot be removed directly (the project
+// reference would be stranded).
 func (r *Repository) ClientHasProjects(ctx context.Context, q Queryer, orgID uuid.UUID, userID uuid.UUID) (bool, error) {
 	var exists bool
 	err := q.QueryRowContext(ctx, `
@@ -257,6 +260,7 @@ func (r *Repository) ClientHasProjects(ctx context.Context, q Queryer, orgID uui
 			SELECT 1 FROM projects
 			WHERE organization_id = $1
 			AND client_id = $2
+			AND deleted_at IS NULL
 		)
 	`, orgID, userID).Scan(&exists)
 	if err != nil {

@@ -356,6 +356,13 @@ func (s *Service) CreateMilestone(ctx context.Context, organizationID uuid.UUID,
 			return err
 		}
 
+		// The past-due-date rule runs after the project state lock (§14.2.1):
+		// deleted -> 404 and freeze -> 400 invalid_status_transition resolve
+		// before the due-date validation.
+		if fields := dueDateFields(&input.DueDate); fields != nil {
+			return apperrors.ErrDueDateInPast
+		}
+
 		milestone.ProjectID = project.ID
 
 		// Create milestone
