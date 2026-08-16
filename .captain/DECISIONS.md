@@ -5,6 +5,21 @@
 
 ---
 
+## 2026-08-16 — Lifecycle backend slice SHIPPED + verified (`924e1ab`, `811d178`, `1835f6b`)
+
+**Outcome:** The project-lifecycle slice is implemented, TDD'd, and independently verified (Tester: 274 live checks + 29 follow-up assertions, all pass; Reviewer: APPROVED; Security: no exploitable vulnerabilities, safe for validation). 247 tests, CI-equivalent. Contract: `egentop-frontend/docs/requirements.md` §14.
+
+**Verification dispositions (Captain):**
+1. **Cross-org access returns 403, not 404** — pre-existing `orgaccess` middleware posture on ALL org-scoped routes; documented as an accepted deviation consistent with the known MEDIUM-4 org-existence oracle (revisit pre-launch). Docs corrected; behavior unchanged.
+2. **Stranded-client cleanup FIXED** — a client whose only project was soft-deleted was un-removable (`ClientHasProjects`/`IsClientOnAnyOtherProject` now filter `deleted_at IS NULL`). Live/frozen projects still block removal; NO auto-prune on delete (founder-approved default stands). No new oracle.
+3. **Milestone-create due-date precedence FIXED** — the past-date check now runs in the service after the project lock (deleted → 404, freeze → 400, past-date → 400 validation_error), matching the update path.
+4. **RBAC evidence settled: `project.update` and `milestone.update` ARE held by admin** — granted by migration 000003; 000005 is purely additive (`ON CONFLICT DO NOTHING`; no `DELETE FROM role_permissions` in any up-migration). A review claim of "owner-only" was refuted by the seeds; docs/api.md corrected to `(owner, admin)`. Frontend permissions matrix must reflect this (admin can delete/edit projects + milestones).
+5. **Accepted-risk notes:** down-migration re-exposes soft-deleted rows (inherent, documented); residual delete-vs-unassign race can strand a membership but is now cleanable via Remove; no partial index on `deleted_at` (scale-appropriate).
+
+**Consequences:** Backend is complete and correct to build the frontend against. Frontend Phase 2B (cockpit + lifecycle UI) proceeds per the Planner's decomposition (`docs/superpowers/plans/2026-08-16-phase-2b-lifecycle-client-page.md`).
+
+---
+
 ## 2026-08-16 — Project lifecycle semantics: due dates, locked states, restore/delete, activity actors (founder-approved, from manual-test observations)
 
 **Decision:** Founder approved all recommendations from the manual-test review session:

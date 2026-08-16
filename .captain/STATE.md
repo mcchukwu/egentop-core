@@ -9,7 +9,7 @@ Validate the wedge (milestone sign-off → revision limits → payment status) w
 
 ## Current Phase
 
-Post-MVP backend → **frontend build in progress** (`egentop-frontend` repo). Layer-1 delta + **reliability pass are COMPLETE** (commits `3185247` → `f3d0230`; 134→136 tests, 0 failures; CI gate live; security-reviewed; reviewed). Frontend Phases 1–2A + the founder-approved fix batch are complete and verified (see `egentop-frontend/.captain/`); **next gate: founder manual test of the batch → Phase 2B (milestone cockpit)** → deploy API + frontend (founder picks provider/region) → validation with 1–2 friendly agencies.
+Backend: **complete + lifecycle slice shipped & verified** (`924e1ab`/`811d178`/`1835f6b`; 247 tests; Reviewer APPROVED; Security: no vulnerabilities). Frontend: Phases 1–2A + fix batch complete; **Phase 2B (milestone cockpit + lifecycle UI) building** against the verified backend contract (decomposition in `egentop-frontend/docs/superpowers/plans/`). Deploy (API + frontend; Cloudflare Pages + VPS; region London/Frankfurt) follows Phase 2B/M-FE-3 → real-device WhatsApp test → validation with 1–2 friendly agencies.
 
 ## Active Work
 
@@ -51,7 +51,7 @@ Post-MVP backend → **frontend build in progress** (`egentop-frontend` repo). L
 
 ## Next Recommended Action
 
-**Backend slice (next workstream, after a Product requirements pass):** 2026-08-16 lifecycle decisions — block past due dates (project + milestone), archived = frozen + restorable (→ active), cancelled = dead + hidden from default list, soft delete (`deleted_at`, history preserved; delete/restore gated by `project.update`), activity payload enriched with actor names. Sequence: Product formalizes acceptance criteria → Database Specialist designs migration 000006 + state transitions + actor-enrichment query → Builder implements (TDD) → Tester verifies + Reviewer approves → scoped Security spot-check (isolation, no-existence-leak, client visibility of archived/deleted). Frontend rides with Phase 2B in `egentop-frontend`. Backend currently requires no other engineering before validation.
+**Phase 2B frontend build** (in `egentop-frontend`, per the Planner's decomposition): milestone cockpit + lifecycle UI (kebab/delete/restore, freeze states, due-date + overdue, actor names, show-closed, bound status control FE-O7, icons + accent — accent hue pending founder) + M-FE-3 client page. Backend requires no further engineering before validation. Deploy-time founder items still open: Cloudflare Pages account/DNS, backend `CORS_ALLOWED_ORIGINS=https://app.egentop.com`, API provider/region (London/Frankfurt recommended).
 
 ## Recent Changes
 
