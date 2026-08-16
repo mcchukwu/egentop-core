@@ -43,6 +43,14 @@ func (s *Service) Create(ctx context.Context, orgID uuid.UUID, userID uuid.UUID,
 	}
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		// Freeze guard first: lock the project row so assignment mutations
+		// serialize with project lifecycle state (archive/delete) and are
+		// rejected on archived/cancelled projects (400 invalid_status_
+		// transition) and on soft-deleted projects (404 project_not_found).
+		if err := s.ProjectLookup.LockForMutation(dbCtx, tx, orgID, projectID); err != nil {
+			return err
+		}
+
 		if err := s.Repo.EnsureProjectInOrganization(dbCtx, tx, orgID, projectID); err != nil {
 			return err
 		}
@@ -99,6 +107,14 @@ func (s *Service) GetByID(ctx context.Context, orgID uuid.UUID, projectID uuid.U
 	assignment := &Assignment{}
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		// Project-first ordering (same as ListByProjectID): a missing,
+		// cross-org, or soft-deleted project resolves as project_not_found
+		// before the assignment lookup — no existence leak for deleted
+		// projects.
+		if _, err := s.ProjectLookup.GetByID(dbCtx, orgID, projectID); err != nil {
+			return err
+		}
+
 		err := s.Repo.GetByIDAndProjectIDAndOrganizationID(dbCtx, tx, orgID, projectID, assignmentID, assignment)
 		if err != nil {
 			return err
@@ -135,6 +151,12 @@ func (s *Service) Update(ctx context.Context, orgID uuid.UUID, userID uuid.UUID,
 	assignment := &Assignment{}
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		// Freeze guard first (see Create): assignment updates are blocked on
+		// frozen and soft-deleted projects.
+		if err := s.ProjectLookup.LockForMutation(dbCtx, tx, orgID, projectID); err != nil {
+			return err
+		}
+
 		if err := s.Repo.GetByIDAndProjectIDAndOrganizationID(dbCtx, tx, orgID, projectID, assignmentID, assignment); err != nil {
 			return err
 		}
@@ -188,6 +210,12 @@ func (s *Service) Delete(ctx context.Context, orgID uuid.UUID, userID uuid.UUID,
 
 	return db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		current := &Assignment{}
+
+		// Freeze guard first (see Create): assignment removal is blocked on
+		// frozen and soft-deleted projects.
+		if err := s.ProjectLookup.LockForMutation(dbCtx, tx, orgID, projectID); err != nil {
+			return err
+		}
 
 		if err := s.Repo.GetByIDAndProjectIDAndOrganizationID(dbCtx, tx, orgID, projectID, assignmentID, current); err != nil {
 			return err

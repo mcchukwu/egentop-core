@@ -37,16 +37,24 @@ func (r *Repository) Create(ctx context.Context, tx *sql.Tx, project *Project) e
 	return nil
 }
 
-// ListByOrganization lists all projects for an organization
-func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID uuid.UUID, q pagination.Query) ([]Project, int, error) {
+// ListByOrganizationID lists all live projects for an organization. Deleted
+// projects are always excluded (from both items and total); cancelled projects
+// are excluded unless includeCancelled is true.
+func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID uuid.UUID, q pagination.Query, includeCancelled bool) ([]Project, int, error) {
 	var projects []Project
 	var total int
+
+	statusClause := ""
+	if !includeCancelled {
+		statusClause = " AND status <> 'cancelled'"
+	}
 
 	countQuery := `
 		SELECT count(*)
 		FROM projects
 		WHERE organization_id = $1
-	`
+		AND deleted_at IS NULL
+	` + statusClause
 
 	if err := r.DB.QueryRowContext(ctx, countQuery, organizationID).Scan(&total); err != nil {
 		return nil, 0, err
@@ -68,6 +76,8 @@ func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID uu
 			revision_limit
 		FROM projects
 		WHERE organization_id = $1
+		AND deleted_at IS NULL
+	` + statusClause + `
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`
@@ -97,8 +107,10 @@ func (r *Repository) ListByOrganizationID(ctx context.Context, organizationID uu
 }
 
 // UpdateDetails updates a project's metadata (name, description, priority,
-// due date and/or status). Nil fields are left unchanged.
-func (r *Repository) UpdateDetails(ctx context.Context, tx *sql.Tx, projectID uuid.UUID, organizationID uuid.UUID, name *string, description *string, priority *ProjectPriority, status *ProjectStatus, dueDate *time.Time) error {
+// due date and/or status). Nil fields are left unchanged, except due_date:
+// the dueDateSet flag must be true for the column to be touched, in which case
+// a nil dueDate clears it (PATCH due_date: null semantics).
+func (r *Repository) UpdateDetails(ctx context.Context, tx *sql.Tx, projectID uuid.UUID, organizationID uuid.UUID, name *string, description *string, priority *ProjectPriority, status *ProjectStatus, dueDateSet bool, dueDate *time.Time) error {
 	query := `
 		UPDATE projects
 		SET
@@ -106,13 +118,13 @@ func (r *Repository) UpdateDetails(ctx context.Context, tx *sql.Tx, projectID uu
 			description = COALESCE($4, description),
 			priority = COALESCE($5, priority),
 			status = COALESCE($6, status),
-			due_date = COALESCE($7, due_date),
+			due_date = CASE WHEN $7 THEN $8 ELSE due_date END,
 			updated_at = NOW()
 		WHERE id = $1
 		AND organization_id = $2
 	`
 
-	result, err := tx.ExecContext(ctx, query, projectID, organizationID, name, description, priority, status, dueDate)
+	result, err := tx.ExecContext(ctx, query, projectID, organizationID, name, description, priority, status, dueDateSet, dueDate)
 	if err != nil {
 		return err
 	}
@@ -164,9 +176,11 @@ func (r *Repository) ListMilestonesByProjectID(ctx context.Context, projectID uu
 
 	countQuery := `
 		SELECT count(*)
-		FROM milestones
-		WHERE project_id = $1
-		AND organization_id = $2
+		FROM milestones m
+		JOIN projects p ON p.id = m.project_id
+		WHERE m.project_id = $1
+		AND m.organization_id = $2
+		AND p.deleted_at IS NULL
 	`
 
 	if err := r.DB.QueryRowContext(ctx, countQuery, projectID, organizationID).Scan(&total); err != nil {
@@ -194,6 +208,7 @@ func (r *Repository) ListMilestonesByProjectID(ctx context.Context, projectID uu
 		JOIN projects p ON p.id = m.project_id
 		WHERE m.project_id = $1
 		AND m.organization_id = $2
+		AND p.deleted_at IS NULL
 		ORDER BY m.created_at DESC
 		LIMIT $3 OFFSET $4
 	`
@@ -225,22 +240,24 @@ func (r *Repository) ListMilestonesByProjectID(ctx context.Context, projectID uu
 }
 
 // UpdateMilestoneDetails updates a milestone's metadata (title, description,
-// due date and/or position). Nil fields are left unchanged.
-func (r *Repository) UpdateMilestoneDetails(ctx context.Context, tx *sql.Tx, milestoneID uuid.UUID, projectID uuid.UUID, organizationID uuid.UUID, title *string, description *string, dueDate *time.Time, position *int) error {
+// due date and/or position). Nil fields are left unchanged, except due_date:
+// the dueDateSet flag must be true for the column to be touched, in which case
+// a nil dueDate clears it (PATCH due_date: null semantics).
+func (r *Repository) UpdateMilestoneDetails(ctx context.Context, tx *sql.Tx, milestoneID uuid.UUID, projectID uuid.UUID, organizationID uuid.UUID, title *string, description *string, dueDateSet bool, dueDate *time.Time, position *int) error {
 	query := `
 	UPDATE milestones
 	SET
 		title = COALESCE($4, title),
 		description = COALESCE($5, description),
-		due_date = COALESCE($6, due_date),
-		position = COALESCE($7, position),
+		due_date = CASE WHEN $6 THEN $7 ELSE due_date END,
+		position = COALESCE($8, position),
 		updated_at = NOW()
 	WHERE id = $1
 	AND project_id = $2
 	AND organization_id = $3
 	`
 
-	result, err := tx.ExecContext(ctx, query, milestoneID, projectID, organizationID, title, description, dueDate, position)
+	result, err := tx.ExecContext(ctx, query, milestoneID, projectID, organizationID, title, description, dueDateSet, dueDate, position)
 	if err != nil {
 		return err
 	}
@@ -260,6 +277,7 @@ func (r *Repository) UpdateMilestoneDetails(ctx context.Context, tx *sql.Tx, mil
 // --- Tenant Isolation queries ---
 
 // GetProjectByIDAndOrganizationID gets an organization-scoped project.
+// Soft-deleted projects resolve as ErrProjectNotFound (no existence leak).
 func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projectID uuid.UUID, organizationID uuid.UUID) (*Project, error) {
 	query := `
 		SELECT
@@ -278,6 +296,7 @@ func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projec
 		FROM projects
 		WHERE id = $1
 		AND organization_id = $2
+		AND deleted_at IS NULL
 	`
 
 	project := &Project{}
@@ -294,7 +313,8 @@ func (r *Repository) GetProjectByIDAndOrganizationID(ctx context.Context, projec
 }
 
 // GetProjectByIDAndOrganizationIDForUpdate gets an organization-scoped
-// project and locks it for the duration of the transaction.
+// project and locks it for the duration of the transaction. Soft-deleted
+// projects resolve as ErrProjectNotFound.
 func (r *Repository) GetProjectByIDAndOrganizationIDForUpdate(ctx context.Context, tx *sql.Tx, projectID uuid.UUID, organizationID uuid.UUID) (*Project, error) {
 	query := `
 		SELECT
@@ -313,6 +333,7 @@ func (r *Repository) GetProjectByIDAndOrganizationIDForUpdate(ctx context.Contex
 		FROM projects
 		WHERE id = $1
 		AND organization_id = $2
+		AND deleted_at IS NULL
 		FOR UPDATE
 	`
 
@@ -352,6 +373,12 @@ const milestoneSelectFrom = `
 	JOIN projects p ON p.id = m.project_id
 `
 
+// milestoneProjectLivePredicate is appended to every milestone WHERE clause so
+// milestone reads are gated on the project still being live (deleted_at IS
+// NULL). Soft-deleted projects resolve as milestone_not_found everywhere the
+// project row itself would 404.
+const milestoneProjectLivePredicate = " AND p.deleted_at IS NULL"
+
 func scanMilestoneRow(scan func(dest ...any) error) (*Milestone, error) {
 	var m Milestone
 
@@ -376,6 +403,7 @@ func (r *Repository) GetMilestoneByIDAndProjectIDAndOrganizationID(ctx context.C
 			WHERE m.id = $1
 			AND m.project_id = $2
 			AND m.organization_id = $3
+			`+milestoneProjectLivePredicate+`
 		`, milestoneID, projectID, organizationID).Scan(dest...)
 	})
 	if err != nil {
@@ -400,6 +428,7 @@ func (r *Repository) GetMilestoneByIDAndProjectIDAndOrganizationIDForUpdate(ctx 
 			WHERE m.id = $1
 			AND m.project_id = $2
 			AND m.organization_id = $3
+			`+milestoneProjectLivePredicate+`
 			FOR UPDATE OF m
 		`, milestoneID, projectID, organizationID).Scan(dest...)
 	})
@@ -594,6 +623,32 @@ func (r *Repository) AssignClient(ctx context.Context, tx *sql.Tx, projectID uui
 	}
 
 	return nil
+}
+
+// SoftDelete marks a project soft-deleted (deleted_at = NOW()), preserving the
+// row so the audit trail and activity feed keep the project's history. Scoped
+// to the organization and to not-yet-deleted rows: zero rows (already deleted
+// or missing) return ErrProjectNotFound. Returns the deletion timestamp that
+// the caller records in the audit metadata.
+func (r *Repository) SoftDelete(ctx context.Context, tx *sql.Tx, projectID uuid.UUID, organizationID uuid.UUID) (*time.Time, error) {
+	var deletedAt time.Time
+	err := tx.QueryRowContext(ctx, `
+		UPDATE projects
+		SET deleted_at = NOW(),
+		    updated_at = NOW()
+		WHERE id = $1
+		AND organization_id = $2
+		AND deleted_at IS NULL
+		RETURNING deleted_at
+	`, projectID, organizationID).Scan(&deletedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, apperrors.ErrProjectNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &deletedAt, nil
 }
 
 // DeleteClientMembership removes the user's membership from the organization
@@ -797,6 +852,7 @@ func (r *Repository) ListAllMilestonesByProjectID(ctx context.Context, organizat
 		`+milestoneSelectFrom+`
 		WHERE m.project_id = $1
 		AND m.organization_id = $2
+		`+milestoneProjectLivePredicate+`
 		ORDER BY m.created_at ASC
 	`, projectID, organizationID)
 	if err != nil {

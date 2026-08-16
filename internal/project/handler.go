@@ -2,6 +2,7 @@ package project
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -11,6 +12,10 @@ import (
 	"github.com/mcchukwu/egentop/internal/validation"
 	"github.com/mcchukwu/egentop/pkg/pagination"
 )
+
+// dueDateInPastMessage is the field-level message for a past due date, used by
+// both the handler-side create check and the service-error mapping on update.
+const dueDateInPastMessage = "due date can't be in the past"
 
 type Handler struct {
 	Service *Service
@@ -31,6 +36,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	fields := validation.ValidateStruct(req)
 	if fields != nil {
+		response.ValidationError(w, fields)
+		return
+	}
+
+	// The past-due-date rule is a create-time validation: reject before the
+	// service call so no row is created.
+	if fields := dueDateFields(&req.DueDate); fields != nil {
 		response.ValidationError(w, fields)
 		return
 	}
@@ -68,7 +80,12 @@ func (h *Handler) ListProjectsByOrganizationID(w http.ResponseWriter, r *http.Re
 
 	q := pagination.Parse(r.URL.Query().Get("page"), r.URL.Query().Get("limit"))
 
-	projects, meta, err := h.Service.ListByOrganizationID(r.Context(), orgID, q)
+	// include_cancelled=true opts the list back in to cancelled projects
+	// ("Show closed"); any other value excludes them. Deleted projects are
+	// never included by any parameter.
+	includeCancelled := r.URL.Query().Get("include_cancelled") == "true"
+
+	projects, meta, err := h.Service.ListByOrganizationID(r.Context(), orgID, q, includeCancelled)
 	if err != nil {
 		response.HandleError(w, err)
 		return
@@ -127,6 +144,19 @@ func (h *Handler) GetProjectByID(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, http.StatusOK, "project fetched", newProjectDetail(project))
 }
 
+// mapDueDatePastError converts the service's past-due-date sentinel into the
+// established validation_error contract (400 + fields.DueDate) and reports
+// whether it handled the error. Update paths run the rule in the service (after
+// the project/milestone row lock so 404/400 precedences hold), and this is the
+// handler-side mapping.
+func mapDueDatePastError(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, apperrors.ErrDueDateInPast) {
+		response.ValidationError(w, map[string]string{"DueDate": dueDateInPastMessage})
+		return true
+	}
+	return false
+}
+
 // Update updates a project's details (name, description, priority, due date, status)
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	var req UpdateProjectRequest
@@ -162,11 +192,42 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 	project, err := h.Service.Update(r.Context(), userID, orgID, projectID, req)
 	if err != nil {
+		if mapDueDatePastError(w, err) {
+			return
+		}
 		response.HandleError(w, err)
 		return
 	}
 
 	response.Success(w, http.StatusOK, "project updated", project)
+}
+
+// Delete soft-deletes a project - DELETE /projects/{project_id}
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	orgID, ok := requestctx.OrganizationID(r.Context())
+	if !ok {
+		response.HandleError(w, apperrors.ErrUnauthorized)
+		return
+	}
+
+	projectID, err := uuid.Parse(r.PathValue("projectID"))
+	if err != nil {
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	if err := h.Service.Delete(r.Context(), userID, orgID, projectID); err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	response.Success(w, http.StatusOK, "project deleted", nil)
 }
 
 // CreateMilestone creates a new milestone - /projects/{project_id}/milestones
@@ -180,6 +241,12 @@ func (h *Handler) CreateMilestone(w http.ResponseWriter, r *http.Request) {
 
 	fields := validation.ValidateStruct(req)
 	if fields != nil {
+		response.ValidationError(w, fields)
+		return
+	}
+
+	// Create-time past-due-date rule: reject before the service call.
+	if fields := dueDateFields(&req.DueDate); fields != nil {
 		response.ValidationError(w, fields)
 		return
 	}
@@ -328,6 +395,9 @@ func (h *Handler) UpdateMilestone(w http.ResponseWriter, r *http.Request) {
 
 	milestone, err := h.Service.UpdateMilestone(r.Context(), orgID, userID, projectID, milestoneID, req)
 	if err != nil {
+		if mapDueDatePastError(w, err) {
+			return
+		}
 		response.HandleError(w, err)
 		return
 	}

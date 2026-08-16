@@ -126,7 +126,7 @@ func TestUpdateProjectMetadata(t *testing.T) {
 		Name:        "Renamed Project",
 		Description: "A description",
 		Priority:    ProjectPriorityHigh,
-		DueDate:     &due,
+		DueDate:     OptionalTime{Present: true, Value: &due},
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)

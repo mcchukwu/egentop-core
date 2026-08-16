@@ -162,11 +162,13 @@ func TestAssignmentCreateAndViewScopedToOrg(t *testing.T) {
 		t.Fatalf("expected assigned_to %s, got %s", s.MemberID, fetched.AssignedTo)
 	}
 
-	// a different org cannot read the assignment (tenant isolation)
+	// a different org cannot read the assignment (tenant isolation;
+	// project-first ordering: the project row of another org resolves as
+	// project_not_found before the assignment lookup).
 	other := seedOrg(t, db, uuid.NewString())
 	_, err = svc.GetByID(ctx, other.OrgID, s.ProjectID, assignment.ID)
-	if !errors.Is(err, apperrors.ErrAssignmentNotFound) {
-		t.Fatalf("expected ErrAssignmentNotFound for cross-org fetch, got %v", err)
+	if !errors.Is(err, apperrors.ErrProjectNotFound) {
+		t.Fatalf("expected ErrProjectNotFound for cross-org fetch, got %v", err)
 	}
 }
 
@@ -212,10 +214,12 @@ func TestAssignmentListUpdateDelete(t *testing.T) {
 		t.Fatalf("expected assigned_to %s after update, got %s", s.UserID, updated.AssignedTo)
 	}
 
-	// cross-org update is blocked
+	// cross-org update is blocked (project-first ordering: the project row of
+	// another org resolves as project_not_found before the assignment lookup —
+	// same as the cross-org list).
 	_, err = svc.Update(ctx, other.OrgID, s.UserID, s.ProjectID, assignment.ID, s.UserID)
-	if !errors.Is(err, apperrors.ErrAssignmentNotFound) {
-		t.Fatalf("expected ErrAssignmentNotFound for cross-org update, got %v", err)
+	if !errors.Is(err, apperrors.ErrProjectNotFound) {
+		t.Fatalf("expected ErrProjectNotFound for cross-org update, got %v", err)
 	}
 
 	// delete
@@ -227,6 +231,105 @@ func TestAssignmentListUpdateDelete(t *testing.T) {
 	if !errors.Is(err, apperrors.ErrAssignmentNotFound) {
 		t.Fatalf("expected ErrAssignmentNotFound after delete, got %v", err)
 	}
+}
+
+// TestAssignmentFreezeGuard (Captain-accepted addition, §14.1.1/AC-LC): a
+// frozen project (archived or cancelled) must not accept assignment
+// mutations — create/update/remove return ErrInvalidStatusTransition and
+// leave the existing assignments intact. Soft-deleted projects resolve
+// project_not_found on every assignment path (no existence leak); completed
+// projects stay mutable (not frozen).
+func TestAssignmentFreezeGuard(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	for _, frozenStatus := range []string{"archived", "cancelled"} {
+		t.Run(frozenStatus, func(t *testing.T) {
+			s := seedOrg(t, db, uuid.NewString())
+			assignment, err := svc.Create(ctx, s.OrgID, s.UserID, s.ProjectID, s.Milestone, s.MemberID)
+			if err != nil {
+				t.Fatalf("create assignment: %v", err)
+			}
+			if _, err := db.ExecContext(ctx, `UPDATE projects SET status = $1 WHERE id = $2`, frozenStatus, s.ProjectID); err != nil {
+				t.Fatalf("freeze project: %v", err)
+			}
+
+			if _, err := svc.Create(ctx, s.OrgID, s.UserID, s.ProjectID, s.Milestone, s.MemberID); !errors.Is(err, apperrors.ErrInvalidStatusTransition) {
+				t.Fatalf("create on %s error = %v, want ErrInvalidStatusTransition", frozenStatus, err)
+			}
+			if _, err := svc.Update(ctx, s.OrgID, s.UserID, s.ProjectID, assignment.ID, s.MemberID); !errors.Is(err, apperrors.ErrInvalidStatusTransition) {
+				t.Fatalf("update on %s error = %v, want ErrInvalidStatusTransition", frozenStatus, err)
+			}
+			if err := svc.Delete(ctx, s.OrgID, s.UserID, s.ProjectID, assignment.ID); !errors.Is(err, apperrors.ErrInvalidStatusTransition) {
+				t.Fatalf("delete on %s error = %v, want ErrInvalidStatusTransition", frozenStatus, err)
+			}
+
+			// The blocked mutations left the assignment intact.
+			unchanged, err := svc.GetByID(ctx, s.OrgID, s.ProjectID, assignment.ID)
+			if err != nil {
+				t.Fatalf("read assignment after blocked mutations: %v", err)
+			}
+			if unchanged.AssignedTo != s.MemberID {
+				t.Fatalf("blocked mutations changed assignee to %s", unchanged.AssignedTo)
+			}
+		})
+	}
+
+	t.Run("deleted project 404 on every path", func(t *testing.T) {
+		s := seedOrg(t, db, uuid.NewString())
+		assignment, err := svc.Create(ctx, s.OrgID, s.UserID, s.ProjectID, s.Milestone, s.MemberID)
+		if err != nil {
+			t.Fatalf("create assignment: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE projects SET deleted_at = NOW() WHERE id = $1`, s.ProjectID); err != nil {
+			t.Fatalf("soft-delete project: %v", err)
+		}
+		if _, err := svc.Create(ctx, s.OrgID, s.UserID, s.ProjectID, s.Milestone, s.MemberID); !errors.Is(err, apperrors.ErrProjectNotFound) {
+			t.Fatalf("create on deleted error = %v, want ErrProjectNotFound", err)
+		}
+		if _, err := svc.Update(ctx, s.OrgID, s.UserID, s.ProjectID, assignment.ID, s.MemberID); !errors.Is(err, apperrors.ErrProjectNotFound) {
+			t.Fatalf("update on deleted error = %v, want ErrProjectNotFound", err)
+		}
+		if err := svc.Delete(ctx, s.OrgID, s.UserID, s.ProjectID, assignment.ID); !errors.Is(err, apperrors.ErrProjectNotFound) {
+			t.Fatalf("delete on deleted error = %v, want ErrProjectNotFound", err)
+		}
+		if _, err := svc.GetByID(ctx, s.OrgID, s.ProjectID, assignment.ID); !errors.Is(err, apperrors.ErrProjectNotFound) {
+			t.Fatalf("GetByID on deleted error = %v, want ErrProjectNotFound", err)
+		}
+		if _, _, err := svc.ListByProjectID(ctx, s.OrgID, s.ProjectID, pagination.Query{Page: 1, Limit: 20}); !errors.Is(err, apperrors.ErrProjectNotFound) {
+			t.Fatalf("list on deleted error = %v, want ErrProjectNotFound", err)
+		}
+	})
+
+	t.Run("completed project stays mutable", func(t *testing.T) {
+		s := seedOrg(t, db, uuid.NewString())
+		assignment, err := svc.Create(ctx, s.OrgID, s.UserID, s.ProjectID, s.Milestone, s.MemberID)
+		if err != nil {
+			t.Fatalf("create assignment: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE projects SET status = 'completed' WHERE id = $1`, s.ProjectID); err != nil {
+			t.Fatalf("complete project: %v", err)
+		}
+		// Update + remove stay allowed on the completed project.
+		if _, err := svc.Update(ctx, s.OrgID, s.UserID, s.ProjectID, assignment.ID, s.UserID); err != nil {
+			t.Fatalf("update on completed: %v", err)
+		}
+		if err := svc.Delete(ctx, s.OrgID, s.UserID, s.ProjectID, assignment.ID); err != nil {
+			t.Fatalf("delete on completed: %v", err)
+		}
+		// Create on a second completed project (assignments are unique per
+		// project, so a fresh project avoids the constraint).
+		secondProject, secondMilestone := seedAdditionalAssignmentProject(t, db, s.OrgID, s.UserID)
+		if _, err := db.ExecContext(ctx, `UPDATE projects SET status = 'completed' WHERE id = $1`, secondProject); err != nil {
+			t.Fatalf("complete second project: %v", err)
+		}
+		if _, err := svc.Create(ctx, s.OrgID, s.UserID, secondProject, secondMilestone, s.MemberID); err != nil {
+			t.Fatalf("create on completed: %v", err)
+		}
+	})
 }
 
 func TestAssignmentListValidEmptyParentAndRejectsMissingParent(t *testing.T) {

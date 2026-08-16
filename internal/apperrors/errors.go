@@ -91,6 +91,12 @@ var (
 
 	ErrInvalidDueDate = errors.New("invalid due date")
 
+	// ErrDueDateInPast is returned by the service for update paths that would
+	// set a due date before today (UTC date). The handler maps it to the
+	// validation_error contract with a fields.DueDate error, keeping the 404
+	// (deleted project) and 400 (frozen project) precedences intact.
+	ErrDueDateInPast = errors.New("due date can't be in the past")
+
 	// LAYER-1 (client role, approvals, revisions, deliverables, payments)
 	ErrProjectHasNoClient = errors.New("project has no client")
 

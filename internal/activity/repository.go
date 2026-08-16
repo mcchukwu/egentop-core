@@ -55,7 +55,11 @@ func (r *Repository) Create(ctx context.Context, tx *sql.Tx, a *Activity) error 
 	)
 }
 
-// List returns the activity feed for an organization, newest first.
+// List returns the activity feed for an organization, newest first. Rows
+// referencing a soft-deleted project render with project_id: null (the
+// project row no longer resolves), so the history is preserved without a
+// dead project link. The project-scoped feed (ListByProjectID) deliberately
+// does not null it — that feed only resolves inside a live project.
 func (r *Repository) List(ctx context.Context, orgID uuid.UUID, q pagination.Query) ([]Activity, int, error) {
 	var activities []Activity
 	var total int
@@ -70,18 +74,21 @@ func (r *Repository) List(ctx context.Context, orgID uuid.UUID, q pagination.Que
 
 	query := `
 		SELECT
-			id,
-			organization_id,
-			project_id,
-			milestone_id,
-			actor_id,
-			type,
-			message,
-			metadata,
-			created_at
-		FROM activities
-		WHERE organization_id = $1
-		ORDER BY created_at DESC
+			a.id,
+			a.organization_id,
+			CASE WHEN p.id IS NULL THEN NULL ELSE a.project_id END AS project_id,
+			a.milestone_id,
+			a.actor_id,
+			a.type,
+			a.message,
+			a.metadata,
+			a.created_at,
+			u.first_name || ' ' || u.last_name AS actor_name
+		FROM activities a
+		LEFT JOIN users u ON u.id = a.actor_id
+		LEFT JOIN projects p ON p.id = a.project_id AND p.deleted_at IS NULL
+		WHERE a.organization_id = $1
+		ORDER BY a.created_at DESC
 		LIMIT $2 OFFSET $3
 	`
 
@@ -95,10 +102,15 @@ func (r *Repository) List(ctx context.Context, orgID uuid.UUID, q pagination.Que
 	for rows.Next() {
 		var a Activity
 		var metadata []byte
+		var actorName sql.NullString
 
-		err := rows.Scan(&a.ID, &a.OrganizationID, &a.ProjectID, &a.MilestoneID, &a.ActorID, &a.Type, &a.Message, &metadata, &a.CreatedAt)
+		err := rows.Scan(&a.ID, &a.OrganizationID, &a.ProjectID, &a.MilestoneID, &a.ActorID, &a.Type, &a.Message, &metadata, &a.CreatedAt, &actorName)
 		if err != nil {
 			return nil, 0, err
+		}
+
+		if actorName.Valid {
+			a.ActorName = &actorName.String
 		}
 
 		if err := json.Unmarshal(metadata, &a.Metadata); err != nil {
@@ -131,19 +143,21 @@ func (r *Repository) ListByProjectID(ctx context.Context, orgID uuid.UUID, proje
 
 	rows, err := r.DB.QueryContext(ctx, `
 		SELECT
-			id,
-			organization_id,
-			project_id,
-			milestone_id,
-			actor_id,
-			type,
-			message,
-			metadata,
-			created_at
-		FROM activities
-		WHERE organization_id = $1
-		AND project_id = $2
-		ORDER BY created_at DESC
+			a.id,
+			a.organization_id,
+			a.project_id,
+			a.milestone_id,
+			a.actor_id,
+			a.type,
+			a.message,
+			a.metadata,
+			a.created_at,
+			u.first_name || ' ' || u.last_name AS actor_name
+		FROM activities a
+		LEFT JOIN users u ON u.id = a.actor_id
+		WHERE a.organization_id = $1
+		AND a.project_id = $2
+		ORDER BY a.created_at DESC
 		LIMIT $3 OFFSET $4
 	`, orgID, projectID, q.Limit, q.Offset())
 	if err != nil {
@@ -154,10 +168,15 @@ func (r *Repository) ListByProjectID(ctx context.Context, orgID uuid.UUID, proje
 	for rows.Next() {
 		var a Activity
 		var metadata []byte
+		var actorName sql.NullString
 
-		err := rows.Scan(&a.ID, &a.OrganizationID, &a.ProjectID, &a.MilestoneID, &a.ActorID, &a.Type, &a.Message, &metadata, &a.CreatedAt)
+		err := rows.Scan(&a.ID, &a.OrganizationID, &a.ProjectID, &a.MilestoneID, &a.ActorID, &a.Type, &a.Message, &metadata, &a.CreatedAt, &actorName)
 		if err != nil {
 			return nil, 0, err
+		}
+
+		if actorName.Valid {
+			a.ActorName = &actorName.String
 		}
 
 		if err := json.Unmarshal(metadata, &a.Metadata); err != nil {

@@ -610,7 +610,13 @@ Request body:
 | `name` | string | required, min 3, max 120 |
 | `description` | string | optional, max 2000 |
 | `priority` | string | optional, `low`, `medium` or `high` |
-| `due_date` | string (RFC 3339) | optional |
+| `due_date` | string (RFC 3339) | optional; must be **today or later** (UTC date) when present |
+
+**Due-date rule (§14.2):** `due_date` may be absent (no due date), but when
+present its UTC date component must not be before today's UTC date. A date
+equal to today passes at any clock time (date-only comparison). A violation
+returns `400 validation_error` with `fields.DueDate` = `"due date can't be in
+the past"` and **no project row is created**.
 
 Response `201` with the created project:
 
@@ -644,6 +650,20 @@ milestones (see the Milestones section).
 ### GET /v1/orgs/{orgID}/projects
 Lists projects in the organization. Permission: `project.list`. Paginated.
 
+Query parameters:
+
+| Parameter | Type | Meaning |
+|-----------|------|---------|
+| `page` | integer | page number (1-based) |
+| `limit` | integer | items per page |
+| `include_cancelled` | string | `true` opts cancelled projects back in ("Show closed"); any other value (or absent) excludes them |
+
+**List filtering (§14.2.4):** the default list includes draft, active,
+completed and archived projects; **cancelled** projects are excluded from
+both `items` and `pagination.total` unless `include_cancelled=true`.
+**Soft-deleted** projects are never included, by any parameter, and are also
+excluded from `total`.
+
 Response `200`: paginated list of project objects (shape above).
 
 ### GET /v1/orgs/{orgID}/projects/{projectID}
@@ -667,12 +687,57 @@ Request body (all fields optional):
 | `description` | string | max 2000 |
 | `priority` | string | `low`, `medium` or `high` |
 | `status` | string | `draft`, `active`, `completed`, `archived`, `cancelled` |
-| `due_date` | string (RFC 3339) | optional |
+| `due_date` | string (RFC 3339) or `null` | must be **today or later** (UTC date) when a value is present; `null` **clears** the date; absent leaves it unchanged |
+
+**Freeze contract (§14.1):** archived and cancelled projects are read-only.
+Any PATCH that would change a field or status on them returns
+`400 invalid_status_transition` and mutates nothing, with two carve-outs:
+a status-only `{"status":"active"}` on an **archived** project is the
+**restore** transition (§14.1.1) and is allowed (the restore emits its own
+`project.restored` audit + activity events); **cancelled** is terminal and
+rejects every PATCH, including restore. Completed projects stay fully
+mutable (not frozen).
+
+**Due-date rule (§14.2):** when `due_date` is a value it must not be in the
+past (UTC date comparison, same rule as create); a violation returns
+`400 validation_error` with `fields.DueDate` and leaves every field —
+including the previous due date — unchanged. Precedence: a soft-deleted
+project resolves `404 project_not_found` first; a frozen project resolves
+`400 invalid_status_transition` before the due-date rule.
 
 Response `200` with the updated project.
 
 Errors: `400` `validation_error` / `invalid_status_transition` /
 `invalid_project_priority`, `404` `project_not_found`.
+
+### DELETE /v1/orgs/{orgID}/projects/{projectID}
+Soft-deletes a project. Permission: `project.update` (owner, admin).
+
+**Soft delete (§14.1):** the project row is preserved with `deleted_at` set,
+so the audit trail and the org activity feed keep the project's history. The
+delete works from **every** status (draft, active, completed, archived,
+cancelled) with identical behavior. After deletion every project-scoped read
+and mutation resolves `404 project_not_found` (no existence leak — it is
+indistinguishable from a never-existing project), the project disappears
+from every list (items and total), and a second delete returns `404`.
+Deleting a project does **not** prune the client's membership (the row keeps
+`client_id` for the audit record). Restore-from-delete is an explicit
+non-goal this slice: deleted is final, history preserved.
+
+Request body: none.
+
+Response `200` with a success envelope and `data: null`:
+
+```json
+{
+  "success": true,
+  "message": "project deleted",
+  "data": null
+}
+```
+
+Errors: `403` `forbidden` (role without `project.update`, or a client),
+`404` `project_not_found` (missing, cross-org, or already deleted).
 
 ### PUT /v1/orgs/{orgID}/projects/{projectID}/client
 Assigns, reassigns, or unassigns the project's client. Permission:
@@ -694,11 +759,13 @@ Behavior:
   both prune the displaced client's membership once they are no longer the
   client of any other project in the organization.
 - No-op requests (no client / same client) succeed without changes.
+- **Frozen projects (§14.1, AC-LC-7):** assigning/reassigning/unassigning on
+  an archived or cancelled project returns `400 invalid_status_transition`.
 
 Response `200` with the updated project.
 
-Errors: `400` `validation_error`, `404` `project_not_found` /
-`client_not_found`.
+Errors: `400` `validation_error` / `invalid_status_transition`, `404`
+`project_not_found` / `client_not_found`.
 
 ### PATCH /v1/orgs/{orgID}/projects/{projectID}/revision-limit
 Sets or clears the project-level revision limit (the default every milestone
@@ -721,8 +788,11 @@ feed.
 Response `200` with the updated project (the project payload itself never
 exposes `revision_limit`).
 
-Errors: `400` `validation_error` (including `revision_limit` < 1),
-`404` `project_not_found`.
+**Frozen projects (§14.1, AC-LC-6):** setting or clearing the limit on an
+archived or cancelled project returns `400 invalid_status_transition`.
+
+Errors: `400` `validation_error` (including `revision_limit` < 1) /
+`invalid_status_transition`, `404` `project_not_found`.
 
 ---
 
@@ -737,7 +807,15 @@ Request body:
 |-------|------|-------|
 | `title` | string | required, min 3, max 120 |
 | `description` | string | optional, max 2000 |
-| `due_date` | string (RFC 3339) | optional |
+| `due_date` | string (RFC 3339) | optional; must be **today or later** (UTC date) when present |
+
+**Due-date rule (§14.2):** same rule as projects — `due_date` may be absent,
+but a present value must not be in the past (UTC date). A violation returns
+`400 validation_error` with `fields.DueDate` and **no milestone row is
+created**.
+
+**Frozen projects (§14.1, AC-LC-3):** creating a milestone on an archived or
+cancelled project returns `400 invalid_status_transition`.
 
 Response `201` with the created milestone:
 
@@ -809,12 +887,18 @@ Request body (all fields optional):
 |-------|------|-------|
 | `title` | string | min 3, max 120 |
 | `description` | string | max 2000 |
-| `due_date` | string (RFC 3339) | optional |
+| `due_date` | string (RFC 3339) or `null` | must be **today or later** (UTC date) when a value is present; `null` **clears** the date; absent leaves it unchanged |
 | `position` | integer | optional |
+
+**Due-date rule (§14.2):** a past value returns `400 validation_error` with
+`fields.DueDate` and leaves the previous date and every other field
+unchanged. **Frozen projects (§14.1, AC-LC-4):** editing metadata on an
+archived or cancelled project returns `400 invalid_status_transition`.
 
 Response `200` with the updated milestone.
 
-Errors: `400` `validation_error`, `404` `milestone_not_found`.
+Errors: `400` `validation_error` / `invalid_status_transition`, `404`
+`milestone_not_found` / `project_not_found`.
 
 ### POST /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/submit
 Submits a milestone for client approval. Permission: `milestone.submit`
@@ -912,7 +996,8 @@ Allowed transitions:
 Adds a link-based deliverable to a milestone. Permission: `deliverable.submit`
 (staff: owner, admin, member). Duplicates are allowed; there is no edit —
 delete and re-add instead. Milestones in `completed` or `cancelled` state are
-frozen.
+frozen, and deliverables are also frozen on archived/cancelled **projects**
+(§14.1, AC-LC-5).
 
 Request body:
 
@@ -946,7 +1031,8 @@ Errors: `400` `validation_error` / `invalid_status_transition`,
 
 ### DELETE /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/deliverables/{deliverableID}
 Removes a deliverable. Permission: `deliverable.submit`. Milestones in
-`completed` or `cancelled` state are frozen.
+`completed` or `cancelled` state are frozen, and deliverables are also frozen
+on archived/cancelled **projects** (§14.1, AC-LC-5).
 
 Response `200` (`data: null`).
 
@@ -956,8 +1042,8 @@ Errors: `400` `invalid_status_transition`, `404` `deliverable_not_found` /
 ### PATCH /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/payment-status
 Updates the display-only payment status. Permission:
 `milestone.payment_status.update` (owner, admin). Any-to-any transitions are
-allowed and audited; no state restriction applies. Same-status requests
-succeed without an event.
+allowed and audited; no state restriction applies (a frozen project is the
+only block, §14.1 AC-LC-6). Same-status requests succeed without an event.
 
 Request body:
 
@@ -967,7 +1053,8 @@ Request body:
 
 Response `200` with the updated milestone.
 
-Errors: `400` `validation_error`, `404` `milestone_not_found`.
+Errors: `400` `validation_error` / `invalid_status_transition`, `404`
+`milestone_not_found` / `project_not_found`.
 
 ### PATCH /v1/orgs/{orgID}/projects/{projectID}/milestones/{milestoneID}/revision-limit
 Sets or clears the per-milestone revision-limit override. Permission:
@@ -983,12 +1070,14 @@ Request body:
 The response carries the resulting **effective** limit (milestone override,
 else project default, else `null` = unlimited) re-read inside the same
 transaction. The change is audited (`milestone.revision_limit_changed`,
-before/after) and written to the activity feed.
+before/after) and written to the activity feed. Frozen projects (§14.1,
+AC-LC-6) block the change with `400 invalid_status_transition`.
 
 Response `200` with the updated milestone.
 
-Errors: `400` `validation_error` (including `revision_limit` < 1),
-`404` `milestone_not_found` / `project_not_found`.
+Errors: `400` `validation_error` (including `revision_limit` < 1) /
+`invalid_status_transition`, `404` `milestone_not_found` /
+`project_not_found`.
 
 ---
 
@@ -1057,6 +1146,13 @@ Response `200`:
 
 Errors: `404` `project_not_found`.
 
+**Lifecycle behavior (§14.1):** a deep link to an **archived** project
+resolves `200` view-only (approve / changes-requested invoked anyway return
+`400 invalid_status_transition`); a **cancelled** project also resolves
+`200` with a read-only payload (the UI renders the "closed" state); a
+**soft-deleted** project resolves `404 project_not_found` — indistinguishable
+from a never-existing project (no existence leak).
+
 ---
 
 ## Assignments
@@ -1091,10 +1187,13 @@ Response `201` with the created assignment:
 
 The assignee must hold an active **staff** membership in the organization
 (client-role memberships are excluded — assignments are a staff concept).
+**Frozen projects (§14.1):** creating an assignment on an archived or
+cancelled project returns `400 invalid_status_transition`; on a soft-deleted
+project the project resolves `404 project_not_found`.
 
-Errors: `400` `validation_error`, `404` `project_not_found` /
-`milestone_not_found` / `membership_not_found` (assignee is not an active
-staff member).
+Errors: `400` `validation_error` / `invalid_status_transition`, `404`
+`project_not_found` / `milestone_not_found` / `membership_not_found`
+(assignee is not an active staff member).
 
 ### GET /v1/orgs/{orgID}/projects/{projectID}/assignments
 Lists assignments for a project. Permission: `assignment.list`. Paginated.
@@ -1102,7 +1201,8 @@ Lists assignments for a project. Permission: `assignment.list`. Paginated.
 ### GET /v1/orgs/{orgID}/projects/{projectID}/assignments/{assignmentID}
 Returns a single assignment. Permission: `assignment.view`.
 
-Errors: `404` `assignment_not_found`.
+Errors: `404` `assignment_not_found` / `project_not_found` (missing,
+cross-org, or soft-deleted project).
 
 ### PATCH /v1/orgs/{orgID}/projects/{projectID}/assignments/{assignmentID}
 Reassigns an assignment to a different user. Permission: `assignment.update`.
@@ -1115,11 +1215,19 @@ Request body:
 
 Response `200` with the updated assignment.
 
-Errors: `400` `validation_error`, `404` `assignment_not_found` /
-`membership_not_found` (new assignee is not an active staff member).
+**Frozen projects (§14.1):** reassigning on an archived or cancelled project
+returns `400 invalid_status_transition`; on a soft-deleted project the
+project resolves `404 project_not_found`.
+
+Errors: `400` `validation_error` / `invalid_status_transition`, `404`
+`assignment_not_found` / `membership_not_found` (new assignee is not an
+active staff member) / `project_not_found`.
 
 ### DELETE /v1/orgs/{orgID}/projects/{projectID}/assignments/{assignmentID}
-Removes an assignment. Permission: `assignment.remove`.
+Removes an assignment. Permission: `assignment.remove`. **Frozen projects
+(§14.1):** removal on an archived or cancelled project returns
+`400 invalid_status_transition`; on a soft-deleted project the project
+resolves `404 project_not_found`.
 
 Response `200`.
 
@@ -1131,6 +1239,19 @@ Response `200`.
 Lists the organization's activity feed, newest first. Permission: `activity.list`.
 Paginated.
 
+Activity items carry **`actor_name`** — the actor's display name
+(`"{first_name} {last_name}"`), resolved by a users join at read time. It is
+`null` (or absent) when the actor is unknown or the row predates the
+enrichment; `actor_id` is retained and the UI renders the name separately
+from the generic `message` (which is byte-identical to pre-enrichment copy).
+
+**Dead-link fix (§14.3):** rows in the org feed that reference a
+**soft-deleted** project render with `project_id: null` — the event and its
+message stay in the feed (history preserved) but no longer link to the
+deleted project. Rows referencing live projects are unaffected. The
+project-scoped feed below never nulls `project_id` (it only resolves inside a
+live project).
+
 Response `200`:
 
 ```json
@@ -1141,6 +1262,7 @@ Response `200`:
       "organization_id": "uuid",
       "project_id": "uuid",
       "actor_id": "uuid",
+      "actor_name": "Chiamaka Okafor",
       "milestone_id": "uuid",
       "type": "project.created",
       "message": "created project Website Redesign",
@@ -1164,7 +1286,7 @@ Errors: `404` `project_not_found` (client actor outside their project).
 Activity `type` values include: `project.created`, `project.archived`,
 `project.completed`, `project.status_changed`, `project.updated`,
 `project.client_assigned`, `project.client_removed`,
-`project.revision_limit_changed`,
+`project.revision_limit_changed`, `project.deleted`, `project.restored`,
 `milestone.created`, `milestone.started`, `milestone.completed`,
 `milestone.cancelled`, `milestone.status_changed`, `milestone.updated`,
 `milestone.submitted`, `milestone.approved`, `milestone.changes_requested`,
@@ -1173,12 +1295,16 @@ Activity `type` values include: `project.created`, `project.archived`,
 `client.provisioned`, `client.credential_rotated`,
 `assignment.created`, `assignment.updated`, `assignment.removed`.
 
-A few of these are declared vocabulary but not currently emitted by any
-endpoint: `project.archived`, `project.completed`, `project.status_changed`,
-`milestone.started`, `milestone.completed` and `milestone.cancelled` — the
-status state machine writes `milestone.status_changed` for every transition
-(including `completed`/`cancelled`) and project status changes write
-`project.updated`. The reserved types exist so the vocabulary is stable for
+`project.deleted` ("Project deleted") is written by the soft-delete endpoint
+and `project.restored` ("Project restored") by the archived→active restore;
+both carry the acting user's `actor_name` (§14.3). A few other declared types
+are reserved vocabulary but not currently emitted: `project.archived`,
+`project.completed`, `project.status_changed`, `milestone.started`,
+`milestone.completed` and `milestone.cancelled` — the status state machine
+writes `milestone.status_changed` for every transition (including
+`completed`/`cancelled`), project status changes write `project.updated`
+(except the restore, which emits `project.restored`), and delete writes
+`project.deleted`. The reserved types exist so the vocabulary is stable for
 clients.
 
 ---
@@ -1261,7 +1387,7 @@ service layer.
 | 403 | `password_change_required` | Must change the one-time password before proceeding |
 | 404 | `organization_not_found` | Organization does not exist or is inactive |
 | 404 | `membership_not_found` | No membership for this user in the org |
-| 404 | `project_not_found` | Project does not exist or is outside the org |
+| 404 | `project_not_found` | Project does not exist, is outside the org, or has been soft-deleted |
 | 404 | `milestone_not_found` | Milestone does not exist or is outside the org |
 | 404 | `assignment_not_found` | Assignment does not exist or is outside the org |
 | 404 | `client_not_found` | User is not an active client of the org |

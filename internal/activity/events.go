@@ -27,4 +27,6 @@ const (
 	ActivityDeliverableRemoved            = "deliverable.removed"
 	ActivityProjectRevisionLimitChanged   = "project.revision_limit_changed"
 	ActivityMilestoneRevisionLimitChanged = "milestone.revision_limit_changed"
+	ActivityProjectDeleted                = "project.deleted"
+	ActivityProjectRestored               = "project.restored"
 )

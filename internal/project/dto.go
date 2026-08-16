@@ -1,35 +1,64 @@
 package project
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
 )
 
+// OptionalTime distinguishes JSON absent, null, and a value for PATCH presence
+// semantics (due_date: null clears; absent leaves unchanged).
+type OptionalTime struct {
+	Present bool
+	Value   *time.Time
+}
+
+// UnmarshalJSON implements json.Unmarshaler. "null" yields {Present:true,
+// Value:nil} (explicit clear); an RFC 3339 value yields {Present:true,
+// Value:&t}; an absent field never calls this and stays {Present:false,
+// Value:nil} (unchanged).
+func (o *OptionalTime) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		o.Present = true
+		o.Value = nil
+		return nil
+	}
+
+	var t time.Time
+	if err := json.Unmarshal(data, &t); err != nil {
+		return err
+	}
+
+	o.Present = true
+	o.Value = &t
+	return nil
+}
+
 type CreateProjectRequest struct {
 	Name        string          `json:"name" validate:"required,min=3,max=120"`
 	Description string          `json:"description" validate:"omitempty,max=2000"`
 	Priority    ProjectPriority `json:"priority" validate:"omitempty"`
-	DueDate     *time.Time      `json:"due_date" validate:"omitempty"`
+	DueDate     OptionalTime    `json:"due_date"`
 }
 type UpdateProjectRequest struct {
 	Name        string          `json:"name" validate:"omitempty,min=3,max=120"`
 	Description string          `json:"description" validate:"omitempty,max=2000"`
 	Priority    ProjectPriority `json:"priority" validate:"omitempty"`
 	Status      ProjectStatus   `json:"status" validate:"omitempty"`
-	DueDate     *time.Time      `json:"due_date" validate:"omitempty"`
+	DueDate     OptionalTime    `json:"due_date"`
 }
 
 type CreateMilestoneInput struct {
-	Title       string     `json:"title" validate:"required,min=3,max=120"`
-	Description string     `json:"description" validate:"max=2000"`
-	DueDate     *time.Time `json:"due_date"`
+	Title       string       `json:"title" validate:"required,min=3,max=120"`
+	Description string       `json:"description" validate:"max=2000"`
+	DueDate     OptionalTime `json:"due_date"`
 }
 type UpdateMilestoneRequest struct {
-	Title       string     `json:"title" validate:"omitempty,min=3,max=120"`
-	Description string     `json:"description" validate:"omitempty,max=2000"`
-	DueDate     *time.Time `json:"due_date" validate:"omitempty"`
-	Position    int        `json:"position" validate:"omitempty"`
+	Title       string       `json:"title" validate:"omitempty,min=3,max=120"`
+	Description string       `json:"description" validate:"omitempty,max=2000"`
+	DueDate     OptionalTime `json:"due_date"`
+	Position    int          `json:"position" validate:"omitempty"`
 }
 
 // AssignClientRequest is the body of PUT /projects/{projectID}/client.

@@ -369,16 +369,15 @@ func TestStatusPatchBlockedOnArchivedProject(t *testing.T) {
 	}
 
 	// A cancelled project blocks it too; the project state machine forbids
-	// leaving the terminal archived state via the API.
+	// leaving the archived state via any transition other than the restore
+	// (archived -> active), so archived -> cancelled is still rejected.
 	if _, err := svc.Update(ctx, ownerID, orgID, projectID, UpdateProjectRequest{Status: ProjectStatusCancelled}); !errors.Is(err, apperrors.ErrInvalidStatusTransition) {
 		t.Fatalf("archived -> cancelled should be rejected by project state machine, got %v", err)
 	}
 
-	// "Un-archive" by restoring the project row directly (no API path exists
-	// to leave the terminal archived state), then the PATCH works again.
-	if _, err := db.ExecContext(ctx, `
-		UPDATE projects SET status = 'active' WHERE id = $1
-	`, projectID); err != nil {
+	// Restore the archived project to active via the real service path (the
+	// approved restore transition), then the PATCH works again.
+	if _, err := svc.Update(ctx, ownerID, orgID, projectID, UpdateProjectRequest{Status: ProjectStatusActive}); err != nil {
 		t.Fatalf("restore project: %v", err)
 	}
 	if _, err := svc.UpdateMilestoneStatus(ctx, ownerID, orgID, projectID, milestoneID, MilestoneStatusInProgress); err != nil {

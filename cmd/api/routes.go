@@ -101,6 +101,7 @@ func protectedRoutes(d routeDeps) []protectedRoute {
 		{method: "GET", pattern: "/v1/orgs/{orgID}/projects", handler: orgScoped("project.list", http.HandlerFunc(d.h.project.ListProjectsByOrganizationID)), gated: true},
 		{method: "GET", pattern: "/v1/orgs/{orgID}/projects/{projectID}", handler: orgScoped("project.view", http.HandlerFunc(d.h.project.GetProjectByID)), gated: true},
 		{method: "PATCH", pattern: "/v1/orgs/{orgID}/projects/{projectID}", handler: orgScoped("project.update", http.HandlerFunc(d.h.project.Update)), gated: true},
+		{method: "DELETE", pattern: "/v1/orgs/{orgID}/projects/{projectID}", handler: orgScoped("project.update", http.HandlerFunc(d.h.project.Delete)), gated: true},
 		{method: "PUT", pattern: "/v1/orgs/{orgID}/projects/{projectID}/client", handler: orgScoped("project.client.assign", http.HandlerFunc(d.h.project.AssignClient)), gated: true},
 
 		// Milestones

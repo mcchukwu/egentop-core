@@ -22,9 +22,14 @@ type Service struct {
 }
 
 // Lookup exposes the narrow project lookup needed by other services without
-// coupling them to the project repository.
+// coupling them to the project repository. LockForMutation is the
+// transactional mutation gate: it locks the project row FOR UPDATE in the
+// caller's transaction and rejects archived/cancelled (frozen) projects with
+// ErrInvalidStatusTransition (soft-deleted/missing resolve as
+// ErrProjectNotFound).
 type Lookup interface {
 	GetByID(ctx context.Context, organizationID uuid.UUID, projectID uuid.UUID) (*Project, error)
+	LockForMutation(ctx context.Context, tx *sql.Tx, organizationID uuid.UUID, projectID uuid.UUID) error
 }
 
 func NewService(db *sql.DB, repo *Repository, auditService *audit.Service, activityService *activity.Service) *Service {
@@ -56,8 +61,8 @@ func (s *Service) Create(ctx context.Context, createdBy uuid.UUID, organizationI
 		}
 	}
 
-	if req.DueDate != nil {
-		dueDate = req.DueDate
+	if req.DueDate.Present {
+		dueDate = req.DueDate.Value
 	}
 
 	project := &Project{
@@ -112,12 +117,13 @@ func (s *Service) Create(ctx context.Context, createdBy uuid.UUID, organizationI
 	return project, err
 }
 
-// ListProjects lists all projects for an organization
-func (s *Service) ListByOrganizationID(ctx context.Context, organizationID uuid.UUID, q pagination.Query) ([]Project, pagination.Meta, error) {
+// ListProjects lists all projects for an organization. Deleted projects are
+// always excluded; cancelled projects are excluded unless includeCancelled.
+func (s *Service) ListByOrganizationID(ctx context.Context, organizationID uuid.UUID, q pagination.Query, includeCancelled bool) ([]Project, pagination.Meta, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	projects, total, err := s.Repo.ListByOrganizationID(dbCtx, organizationID, q)
+	projects, total, err := s.Repo.ListByOrganizationID(dbCtx, organizationID, q, includeCancelled)
 	if err != nil {
 		return nil, pagination.Meta{}, err
 	}
@@ -147,6 +153,11 @@ func (s *Service) ViewProject(ctx context.Context, actorID uuid.UUID, role strin
 
 // Update updates a project's metadata (name, description, priority, due date
 // and/or status). Fields left empty in the request are unchanged.
+//
+// Freeze semantics: archived and cancelled projects are read-only except the
+// single restore transition (archived -> active with no other fields), which
+// emits its own project.restored audit + activity events. Cancelled is
+// terminal and rejects everything.
 func (s *Service) Update(ctx context.Context, userID uuid.UUID, organizationID uuid.UUID, projectID uuid.UUID, req UpdateProjectRequest) (*Project, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
@@ -154,7 +165,8 @@ func (s *Service) Update(ctx context.Context, userID uuid.UUID, organizationID u
 	var updated *Project
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		// Verify the project belongs to the actor organization
+		// Verify the project belongs to the actor organization (and is not
+		// soft-deleted — deleted resolves as project_not_found, 404 first).
 		project, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, organizationID)
 		if err != nil {
 			return err
@@ -162,10 +174,30 @@ func (s *Service) Update(ctx context.Context, userID uuid.UUID, organizationID u
 
 		oldStatus := project.Status
 
+		// Freeze + restore gate (evaluated before the past-due-date rule per
+		// §14.2.1: the state lock comes first).
+		frozen := project.Status == ProjectStatusArchived || project.Status == ProjectStatusCancelled
+		restore := project.Status == ProjectStatusArchived &&
+			req.Status == ProjectStatusActive &&
+			req.Name == "" && req.Description == "" && req.Priority == "" && !req.DueDate.Present
+		if frozen && !restore {
+			return apperrors.ErrInvalidStatusTransition
+		}
+
+		// Restore (archived -> active): the only unfreeze.
+		if restore {
+			return s.restoreProject(dbCtx, tx, userID, organizationID, project)
+		}
+
+		if fields := dueDateFields(&req.DueDate); fields != nil {
+			return apperrors.ErrDueDateInPast
+		}
+
 		var name *string
 		var description *string
 		var priority *ProjectPriority
 		var status *ProjectStatus
+		var dueDateSet bool
 		var dueDate *time.Time
 
 		if req.Name != "" {
@@ -190,11 +222,12 @@ func (s *Service) Update(ctx context.Context, userID uuid.UUID, organizationID u
 			}
 			status = &st
 		}
-		if req.DueDate != nil {
-			dueDate = req.DueDate
+		if req.DueDate.Present {
+			dueDateSet = true
+			dueDate = req.DueDate.Value
 		}
 
-		if err := s.Repo.UpdateDetails(dbCtx, tx, projectID, organizationID, name, description, priority, status, dueDate); err != nil {
+		if err := s.Repo.UpdateDetails(dbCtx, tx, projectID, organizationID, name, description, priority, status, dueDateSet, dueDate); err != nil {
 			return err
 		}
 
@@ -211,8 +244,12 @@ func (s *Service) Update(ctx context.Context, userID uuid.UUID, organizationID u
 			metadata["old_status"] = oldStatus
 			metadata["new_status"] = *status
 		}
-		if dueDate != nil {
-			metadata["new_due_date"] = dueDate.String()
+		if dueDateSet {
+			if dueDate != nil {
+				metadata["new_due_date"] = dueDate.String()
+			} else {
+				metadata["new_due_date"] = nil
+			}
 		}
 
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
@@ -249,6 +286,42 @@ func (s *Service) Update(ctx context.Context, userID uuid.UUID, organizationID u
 	return updated, nil
 }
 
+// restoreProject re-activates an archived project and records the restore as
+// its own audit + activity events (project.restored) instead of the generic
+// updated path. The project row is already locked and the request is a pure
+// {status: "active"} PATCH (enforced by the caller).
+func (s *Service) restoreProject(ctx context.Context, tx *sql.Tx, userID uuid.UUID, organizationID uuid.UUID, project *Project) error {
+	status := ProjectStatusActive
+	if err := s.Repo.UpdateDetails(ctx, tx, project.ID, organizationID, nil, nil, nil, &status, false, nil); err != nil {
+		return err
+	}
+
+	if err := s.AuditService.Log(ctx, tx, audit.LogEntry{
+		OrganizationID: &organizationID,
+		UserID:         &userID,
+		Action:         "project.restored",
+		EntityType:     "project",
+		EntityID:       &project.ID,
+		Metadata: audit.VersionedMetadata(
+			map[string]any{"status": project.Status},
+			map[string]any{"status": "active"},
+			"",
+		),
+	}); err != nil {
+		return err
+	}
+
+	if err := s.ActivityService.Log(ctx, tx, activity.NewActivity(
+		organizationID, userID, &project.ID, nil,
+		activity.ActivityProjectRestored, "Project restored",
+		map[string]any{"project_id": &project.ID, "name": &project.Name},
+	)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // CreateMilestone creates a new milestone
 func (s *Service) CreateMilestone(ctx context.Context, organizationID uuid.UUID, projectID uuid.UUID, userID uuid.UUID, input CreateMilestoneInput) (*Milestone, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
@@ -257,8 +330,8 @@ func (s *Service) CreateMilestone(ctx context.Context, organizationID uuid.UUID,
 	// Validate input
 	var dueDate *time.Time
 
-	if input.DueDate != nil {
-		dueDate = input.DueDate
+	if input.DueDate.Present {
+		dueDate = input.DueDate.Value
 	}
 
 	milestone := &Milestone{
@@ -272,9 +345,14 @@ func (s *Service) CreateMilestone(ctx context.Context, organizationID uuid.UUID,
 	}
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		// Verify if project belong to actor organization
-		project, err := s.ensureProjectAccess(dbCtx, projectID, organizationID)
+		// Verify the project belongs to the actor organization, lock the row,
+		// and block the milestone create on frozen (archived/cancelled)
+		// projects. Soft-deleted projects resolve as project_not_found.
+		project, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, organizationID)
 		if err != nil {
+			return err
+		}
+		if err := assertProjectNotFrozen(project); err != nil {
 			return err
 		}
 
@@ -383,14 +461,25 @@ func (s *Service) UpdateMilestone(ctx context.Context, orgID uuid.UUID, userID u
 	var updated *Milestone
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
-		// Verify the milestone belongs to the actor organization
-		milestone, err := s.ensureMilestoneAccess(dbCtx, projectID, milestoneID, orgID)
+		// Lock the project row first (blocks the freeze/restore/delete races
+		// and gates the milestone metadata edit on the project lifecycle
+		// state), then read the milestone.
+		project, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, orgID)
+		if err != nil {
+			return err
+		}
+		if err := assertProjectNotFrozen(project); err != nil {
+			return err
+		}
+
+		milestone, err := s.Repo.GetMilestoneByIDAndProjectIDAndOrganizationID(dbCtx, milestoneID, projectID, orgID)
 		if err != nil {
 			return err
 		}
 
 		var title *string
 		var description *string
+		var dueDateSet bool
 		var dueDate *time.Time
 		var position *int
 
@@ -400,19 +489,24 @@ func (s *Service) UpdateMilestone(ctx context.Context, orgID uuid.UUID, userID u
 		if req.Description != "" {
 			description = &req.Description
 		}
-		if req.DueDate != nil {
-			dueDate = req.DueDate
+		if req.DueDate.Present {
+			dueDateSet = true
+			dueDate = req.DueDate.Value
 		}
 		if req.Position != 0 {
 			position = &req.Position
 		}
 
-		if title == nil && description == nil && dueDate == nil && position == nil {
+		if title == nil && description == nil && !dueDateSet && position == nil {
 			updated = milestone
 			return nil
 		}
 
-		if err := s.Repo.UpdateMilestoneDetails(dbCtx, tx, milestoneID, projectID, orgID, title, description, dueDate, position); err != nil {
+		if fields := dueDateFields(&req.DueDate); fields != nil {
+			return apperrors.ErrDueDateInPast
+		}
+
+		if err := s.Repo.UpdateMilestoneDetails(dbCtx, tx, milestoneID, projectID, orgID, title, description, dueDateSet, dueDate, position); err != nil {
 			return err
 		}
 
@@ -422,8 +516,12 @@ func (s *Service) UpdateMilestone(ctx context.Context, orgID uuid.UUID, userID u
 			metadata["old_title"] = milestone.Title
 			metadata["new_title"] = *title
 		}
-		if dueDate != nil {
-			metadata["new_due_date"] = dueDate.String()
+		if dueDateSet {
+			if dueDate != nil {
+				metadata["new_due_date"] = dueDate.String()
+			} else {
+				metadata["new_due_date"] = nil
+			}
 		}
 
 		err = s.AuditService.Log(dbCtx, tx, audit.LogEntry{
@@ -475,6 +573,9 @@ func (s *Service) AssignClient(ctx context.Context, actorID uuid.UUID, organizat
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		project, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, organizationID)
 		if err != nil {
+			return err
+		}
+		if err := assertProjectNotFrozen(project); err != nil {
 			return err
 		}
 
@@ -948,6 +1049,16 @@ func (s *Service) CreateDeliverable(ctx context.Context, userID uuid.UUID, organ
 	var result *Deliverable
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		// Lock the project row and block deliverable mutations on frozen
+		// (archived/cancelled) projects before the milestone checks.
+		project, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, organizationID)
+		if err != nil {
+			return err
+		}
+		if err := assertProjectNotFrozen(project); err != nil {
+			return err
+		}
+
 		milestone, err := s.Repo.GetMilestoneByIDAndProjectIDAndOrganizationIDForUpdate(dbCtx, tx, milestoneID, projectID, organizationID)
 		if err != nil {
 			return err
@@ -1010,6 +1121,16 @@ func (s *Service) DeleteDeliverable(ctx context.Context, userID uuid.UUID, organ
 	defer cancel()
 
 	return db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		// Lock the project row and block deliverable mutations on frozen
+		// (archived/cancelled) projects before the milestone checks.
+		project, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, organizationID)
+		if err != nil {
+			return err
+		}
+		if err := assertProjectNotFrozen(project); err != nil {
+			return err
+		}
+
 		milestone, err := s.Repo.GetMilestoneByIDAndProjectIDAndOrganizationIDForUpdate(dbCtx, tx, milestoneID, projectID, organizationID)
 		if err != nil {
 			return err
@@ -1064,6 +1185,16 @@ func (s *Service) UpdateMilestonePaymentStatus(ctx context.Context, userID uuid.
 	var result *Milestone
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		// Lock the project row and block the payment-status change on frozen
+		// (archived/cancelled) projects before the milestone read.
+		project, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, organizationID)
+		if err != nil {
+			return err
+		}
+		if err := assertProjectNotFrozen(project); err != nil {
+			return err
+		}
+
 		milestone, err := s.Repo.GetMilestoneByIDAndProjectIDAndOrganizationIDForUpdate(dbCtx, tx, milestoneID, projectID, organizationID)
 		if err != nil {
 			return err
@@ -1126,6 +1257,9 @@ func (s *Service) SetProjectRevisionLimit(ctx context.Context, userID uuid.UUID,
 		if err != nil {
 			return err
 		}
+		if err := assertProjectNotFrozen(project); err != nil {
+			return err
+		}
 
 		if err := s.Repo.SetProjectRevisionLimit(dbCtx, tx, projectID, organizationID, limit); err != nil {
 			return err
@@ -1177,8 +1311,13 @@ func (s *Service) SetMilestoneRevisionLimit(ctx context.Context, userID uuid.UUI
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
 		// Lock the project row first so the limit change serializes against
-		// project-level state mutations (archive, assign, metadata updates).
-		if _, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, organizationID); err != nil {
+		// project-level state mutations (archive, assign, metadata updates),
+		// and block it on frozen (archived/cancelled) projects.
+		project, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, organizationID)
+		if err != nil {
+			return err
+		}
+		if err := assertProjectNotFrozen(project); err != nil {
 			return err
 		}
 
@@ -1230,6 +1369,54 @@ func (s *Service) SetMilestoneRevisionLimit(ctx context.Context, userID uuid.UUI
 	}
 
 	return result, nil
+}
+
+// Delete soft-deletes a project: the row keeps deleted_at set and is preserved
+// for the audit trail and the org activity feed (a hard delete would cascade
+// activities away). Works from every status (no freeze interaction); the
+// client_id is retained and no client membership is pruned — access ends via
+// the deleted -> 404 filters. audit project.deleted + activity project.deleted
+// are written in the same transaction.
+func (s *Service) Delete(ctx context.Context, userID uuid.UUID, organizationID uuid.UUID, projectID uuid.UUID) error {
+	dbCtx, cancel := db.WithDBTimeout(ctx)
+	defer cancel()
+
+	return db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		project, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(dbCtx, tx, projectID, organizationID)
+		if err != nil {
+			return err
+		}
+
+		deletedAt, err := s.Repo.SoftDelete(dbCtx, tx, projectID, organizationID)
+		if err != nil {
+			return err
+		}
+
+		if err := s.AuditService.Log(dbCtx, tx, audit.LogEntry{
+			OrganizationID: &organizationID,
+			UserID:         &userID,
+			Action:         "project.deleted",
+			EntityType:     "project",
+			EntityID:       &projectID,
+			Metadata: audit.VersionedMetadata(
+				map[string]any{"status": project.Status, "name": project.Name},
+				map[string]any{"deleted_at": deletedAt},
+				"",
+			),
+		}); err != nil {
+			return err
+		}
+
+		if err := s.ActivityService.Log(dbCtx, tx, activity.NewActivity(
+			organizationID, userID, &projectID, nil,
+			activity.ActivityProjectDeleted, "Project deleted",
+			map[string]any{"project_id": &projectID, "name": &project.Name},
+		)); err != nil {
+			return err
+		}
+
+		return nil
+	})
 }
 
 // GetApprovalView builds the shared deep-link payload: the project plus every
@@ -1294,18 +1481,42 @@ func (s *Service) ListProjectActivities(ctx context.Context, actorID uuid.UUID, 
 
 // --- Helpers ---
 
-// Ensure project is accessible by the user (staff path: org-scoped only).
-func (s *Service) ensureProjectAccess(ctx context.Context, projectID uuid.UUID, organizationID uuid.UUID) (*Project, error) {
-	project, err := s.Repo.GetProjectByIDAndOrganizationID(ctx, projectID, organizationID)
-
-	return project, err
+// assertProjectNotFrozen blocks every mutation on archived/cancelled projects
+// with the established state-block error. Call after the project row is locked.
+func assertProjectNotFrozen(p *Project) error {
+	if p.Status == ProjectStatusArchived || p.Status == ProjectStatusCancelled {
+		return apperrors.ErrInvalidStatusTransition
+	}
+	return nil
 }
 
-// Ensure milestone is accessible by the user
-func (s *Service) ensureMilestoneAccess(ctx context.Context, projectID uuid.UUID, milestoneID uuid.UUID, organizationID uuid.UUID) (*Milestone, error) {
-	milestone, err := s.Repo.GetMilestoneByIDAndProjectIDAndOrganizationID(ctx, milestoneID, projectID, organizationID)
+// LockForMutation locks the project row FOR UPDATE inside the caller's
+// transaction and blocks mutations on frozen (archived/cancelled) projects;
+// soft-deleted or missing projects resolve as ErrProjectNotFound. This is the
+// cross-package freeze guard used by dependent services (assignment) that
+// mutate project-scoped rows — it keeps the project lifecycle semantics in
+// this package while giving the caller the lock it must hold to serialize
+// against archive/delete.
+func (s *Service) LockForMutation(ctx context.Context, tx *sql.Tx, organizationID uuid.UUID, projectID uuid.UUID) error {
+	project, err := s.Repo.GetProjectByIDAndOrganizationIDForUpdate(ctx, tx, projectID, organizationID)
+	if err != nil {
+		return err
+	}
+	return assertProjectNotFrozen(project)
+}
 
-	return milestone, err
+// dueDateFields reports a fields.DueDate validation error when the optional
+// due date is present, non-null, and its UTC date component is before today's
+// UTC date. Date-only comparison: a date equal to today passes at any clock
+// time (string compare of YYYY-MM-DD is sufficient).
+func dueDateFields(due *OptionalTime) map[string]string {
+	if due == nil || !due.Present || due.Value == nil {
+		return nil
+	}
+	if due.Value.UTC().Format("2006-01-02") < time.Now().UTC().Format("2006-01-02") {
+		return map[string]string{"DueDate": "due date can't be in the past"}
+	}
+	return nil
 }
 
 // ensureActorProjectAccess enforces project scope for client-role actors on
@@ -1389,6 +1600,9 @@ func validateProjectStatusTransition(current ProjectStatus, next ProjectStatus) 
 		}
 
 	case ProjectStatusArchived:
+		if next == ProjectStatusActive {
+			return nil
+		}
 		return apperrors.ErrInvalidStatusTransition
 	case ProjectStatusCancelled:
 		return apperrors.ErrInvalidStatusTransition
