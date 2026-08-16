@@ -9,7 +9,7 @@ Validate the wedge (milestone sign-off → revision limits → payment status) w
 
 ## Current Phase
 
-Post-MVP backend → **API-first validation**. Layer-1 delta + **reliability pass are COMPLETE** (commits `3185247` → `f3d0230`; 134 tests, 0 failures; CI gate live; security-reviewed; reviewed). **Next: stand up the minimal validation deployment** (founder picks provider/region) and run the wedge with 1–2 friendly agencies.
+Post-MVP backend → **frontend build in progress** (`egentop-frontend` repo). Layer-1 delta + **reliability pass are COMPLETE** (commits `3185247` → `f3d0230`; 134→136 tests, 0 failures; CI gate live; security-reviewed; reviewed). Frontend Phases 1–2A + the founder-approved fix batch are complete and verified (see `egentop-frontend/.captain/`); **next gate: founder manual test of the batch → Phase 2B (milestone cockpit)** → deploy API + frontend (founder picks provider/region) → validation with 1–2 friendly agencies.
 
 ## Active Work
 
@@ -27,8 +27,8 @@ Post-MVP backend → **API-first validation**. Layer-1 delta + **reliability pas
 
 ## Current Blockers
 
-- **None technical.** 134→136/136 tests, CI-gated, review-approved.
-- All founder sign-offs complete (2026-08-15); FE-O2 landed. Next gate: Planner decomposition → frontend build session.
+- **None technical.** 136/136 tests, CI-gated, review-approved.
+- Frontend gate: founder manual test of the fix batch → Phase 2B go (in `egentop-frontend`).
 
 ## Important Risks
 
@@ -51,7 +51,7 @@ Post-MVP backend → **API-first validation**. Layer-1 delta + **reliability pas
 
 ## Next Recommended Action
 
-FE-O2 DONE (`42d0875`). Next: Planner decomposes the frontend build in `/home/miracle/projects/egentop-frontend` (stack locked: Svelte 5 + SvelteKit 2 — FE-O6) → Builder executes phases → deploy frontend + API + CORS env + smoke (DevOps; region London/Frankfurt) → real-device WhatsApp session test → run validation with 1–2 friendly agencies. Backend requires no further engineering before validation.
+Frontend build is IN PROGRESS in `/home/miracle/projects/egentop-frontend` (Phases 1–2A + fix batch complete + independently verified; stack: Svelte 5 + SvelteKit 2 — FE-O6). Next: founder manual test of the batch → **Phase 2B (milestone cockpit)** → M-FE-3 client page → deploy frontend + API + CORS env + smoke (DevOps; Cloudflare Pages for the app; region London/Frankfurt pending founder) → real-device WhatsApp session test → run validation with 1–2 friendly agencies. Backend requires no further engineering before validation.
 
 ## Recent Changes
 
