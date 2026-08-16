@@ -5,7 +5,7 @@
 
 ## Current Objective
 
-Validate the wedge (milestone sign-off → revision limits → payment status) with real agencies, **API-first**, on a fully reliable backend. Frontend is deferred until validation signals justify the build.
+Validate the wedge (milestone sign-off → revision limits → payment status) with real agencies on a fully reliable backend + minimal frontend. Backend: complete and validation-ready. Frontend: Phases 1–2A + fix batch complete; lifecycle decisions (2026-08-16) approved → backend slice → Phase 2B next.
 
 ## Current Phase
 
@@ -51,7 +51,7 @@ Post-MVP backend → **frontend build in progress** (`egentop-frontend` repo). L
 
 ## Next Recommended Action
 
-Frontend build is IN PROGRESS in `/home/miracle/projects/egentop-frontend` (Phases 1–2A + fix batch complete + independently verified; stack: Svelte 5 + SvelteKit 2 — FE-O6). Next: founder manual test of the batch → **Phase 2B (milestone cockpit)** → M-FE-3 client page → deploy frontend + API + CORS env + smoke (DevOps; Cloudflare Pages for the app; region London/Frankfurt pending founder) → real-device WhatsApp session test → run validation with 1–2 friendly agencies. Backend requires no further engineering before validation.
+**Backend slice (next workstream, after a Product requirements pass):** 2026-08-16 lifecycle decisions — block past due dates (project + milestone), archived = frozen + restorable (→ active), cancelled = dead + hidden from default list, soft delete (`deleted_at`, history preserved; delete/restore gated by `project.update`), activity payload enriched with actor names. Sequence: Product formalizes acceptance criteria → Database Specialist designs migration 000006 + state transitions + actor-enrichment query → Builder implements (TDD) → Tester verifies + Reviewer approves → scoped Security spot-check (isolation, no-existence-leak, client visibility of archived/deleted). Frontend rides with Phase 2B in `egentop-frontend`. Backend currently requires no other engineering before validation.
 
 ## Recent Changes
 

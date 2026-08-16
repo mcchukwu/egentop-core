@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-08-16 — Project lifecycle semantics: due dates, locked states, restore/delete, activity actors (founder-approved, from manual-test observations)
+
+**Decision:** Founder approved all recommendations from the manual-test review session:
+
+1. **Due dates must not be in the past** — backend rule on project AND milestone create/edit (clear allowed); frontend `min=today`. Fixes a confirmed validation gap (`validate:"omitempty"` — no date check). Consequence: an OVERDUE indicator is needed for dates that pass while a project is active.
+2. **Archived = frozen, restorable; cancelled = dead** — archived projects become read-only except restore; cancelled projects become read-only and are terminal. New allowed transition: **archived → active (restore)**. This changes `validateProjectStatusTransition`.
+3. **Delete = SOFT delete** (`deleted_at`, history preserved — audit-first product must not hard-delete audit/activity/revision history); deleted projects excluded from list + read (404, no existence leak, org-scoped). **Cancelled projects hidden from the default list** (terminal/dead, still in the record). Who can delete/restore: default `project.update` (no new permission key for now — revisit with custom roles).
+4. **Restore target: archived → active** (decision #2).
+5. **Activity feed must show actors** — payload currently carries `actor_id` only, messages are generic ("Project created"); enrich with actor display name (one join) for both staff and client surfaces.
+6. **Status-dropdown UX (FE-O7)** — bound, non-resetting control; frontend polish folded into Phase 2B.
+
+**Context:** Founder's manual test of the frontend fix batch passed (2026-08-16) and produced these observations; each was verified against the code (due-date validation gap, cancelled/archived field editability, missing DELETE endpoint, activity payload lacking actor names) before being recommended.
+
+**Consequences — backend slice (next):** Product formalizes these into acceptance criteria → Database Specialist designs migration 000006 (`deleted_at` + filters; state-machine restore; due-date rule; actor enrichment query) → Builder implements (TDD) → Tester verifies + Reviewer approves → scoped Security spot-check of the delete/restore paths (multi-tenant isolation, no existence leak, client visibility of archived/deleted projects). Frontend consequences tracked in `egentop-frontend/.captain/DECISIONS.md` (kebab menu, delete/restore UI, actor display, icons + accent pass, overdue tags, two-column detail layout, FE-O7 — folded into Phase 2B).
+
+---
+
 ## 2026-08-15 — Founder sign-offs: FE-O1/FE-O2/FE-O3; deployment region confirmed; backend completeness re-confirmed
 
 **Decision:** Founder approved all frontend-repo gates and the validation deployment plan:
