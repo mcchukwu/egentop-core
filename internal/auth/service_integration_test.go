@@ -440,12 +440,13 @@ func TestRegisterCreatesDefaultOrgWithSlug(t *testing.T) {
 
 	var orgID uuid.UUID
 	var orgName, slug string
+	var isPersonal bool
 	if err := db.QueryRowContext(ctx, `
-		SELECT o.id, o.name, o.slug
+		SELECT o.id, o.name, o.slug, o.is_personal
 		FROM organizations o
 		JOIN memberships m ON m.organization_id = o.id
 		WHERE m.user_id = $1
-	`, userID).Scan(&orgID, &orgName, &slug); err != nil {
+	`, userID).Scan(&orgID, &orgName, &slug, &isPersonal); err != nil {
 		t.Fatalf("find default org: %v", err)
 	}
 
@@ -457,6 +458,11 @@ func TestRegisterCreatesDefaultOrgWithSlug(t *testing.T) {
 	}
 	if !regexp.MustCompile(`^[a-z0-9-]+$`).MatchString(slug) {
 		t.Fatalf("slug must match ^[a-z0-9-]+$, got %q", slug)
+	}
+	// The registration default org is a PERSONAL workspace: no staff members
+	// may be added/invited/re-role'd/removed (clients remain allowed).
+	if !isPersonal {
+		t.Fatal("expected registration default org is_personal = true")
 	}
 
 	// registration records an organization.created audit row scoped to the org

@@ -62,6 +62,11 @@ var (
 
 	ErrInvitationPending = errors.New("invitation already pending")
 
+	// ErrPersonalWorkspace is returned by staff-membership mutations on a
+	// registration-created personal workspace. It maps to 409 Conflict (the
+	// actor isn't lacking permission — even the owner is blocked), NOT 403.
+	ErrPersonalWorkspace = errors.New("personal workspace does not accept staff members")
+
 	// PROJECTS
 	ErrProjectNotFound = errors.New("project not found")
 

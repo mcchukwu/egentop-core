@@ -32,6 +32,12 @@ type Membership struct {
 	Role           Role             `json:"role"`
 	Status         MembershipStatus `json:"status"`
 	JoinedAt       time.Time        `json:"joined_at"`
+	// IsPersonal reports whether the organization is a registration-created
+	// personal workspace (no staff members may be added/invited/re-role'd/
+	// removed; clients remain allowed). Resolved from the organizations row at
+	// read time so the org switcher and member list can render the personal
+	// state — it is never silently false.
+	IsPersonal bool `json:"is_personal"`
 	// MemberName is the member's display name ("{first_name} {last_name}"),
 	// resolved by a users join at read time (same pattern as activity
 	// actor_name). Nil when the user row does not resolve (defensive —

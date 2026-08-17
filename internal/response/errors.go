@@ -109,6 +109,9 @@ func HandleError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusConflict, "already_member", "user already belongs to organization")
 	case errors.Is(err, apperrors.ErrInvitationPending):
 		Error(w, http.StatusConflict, "invitation_pending", "invitation already pending")
+	case errors.Is(err, apperrors.ErrPersonalWorkspace):
+		Error(w, http.StatusConflict, "personal_workspace",
+			"this is a personal workspace; create a new workspace to invite members")
 
 	// PROJECTS / MILESTONES / ASSIGNMENTS
 	case errors.Is(err, apperrors.ErrProjectNotFound):

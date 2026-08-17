@@ -292,8 +292,16 @@ the current one), `401` `invalid_password`.
 
 ## Organizations
 
+The organization auto-created at **registration** is a **personal workspace**
+(`is_personal: true`): no staff members may be added, invited, re-role'd, or
+removed on it (those routes return `409 personal_workspace` — even for the
+owner). Collaboration requires creating a **new workspace** via
+`POST /v1/orgs` (`is_personal: false`). **Clients remain allowed** on personal
+workspaces: provision, assign, and the approval flow keep working unchanged.
+
 ### POST /v1/orgs
-Creates an organization and makes the authenticated user its `owner`.
+Creates an organization and makes the authenticated user its `owner`. The
+created workspace is always `is_personal: false`.
 
 Request body:
 
@@ -315,6 +323,8 @@ Errors: `400` `validation_error`, `409` `organization_slug_exists`.
 
 ### GET /v1/orgs
 Lists the organizations the authenticated user is a member of. Paginated.
+Each membership item carries **`is_personal`** — whether the org is the
+registration-created personal workspace.
 
 Response `200`: paginated list of membership objects:
 
@@ -328,6 +338,7 @@ Response `200`: paginated list of membership objects:
       "role_id": "uuid",
       "role": "owner",
       "status": "active",
+      "is_personal": true,
       "joined_at": "2026-08-11T10:00:00Z"
     }
   ],
@@ -349,6 +360,7 @@ Response `200`:
     "name": "Acme",
     "slug": "acme",
     "status": "active",
+    "is_personal": false,
     "created_at": "2026-08-11T10:00:00Z",
     "updated_at": "2026-08-11T10:00:00Z"
   }
@@ -377,6 +389,10 @@ Each item carries **`member_name`** — the member's display name
 (`"{first_name} {last_name}"`), resolved by a users join at read time; the UI
 renders names instead of raw user IDs. `user_id` is retained.
 
+Each item also carries **`is_personal`** — whether the org is the
+registration-created personal workspace (the owner sees themselves; the UI
+renders the personal state from this list).
+
 Response `200`:
 
 ```json
@@ -389,6 +405,7 @@ Response `200`:
       "role_id": "uuid",
       "role": "member",
       "status": "active",
+      "is_personal": false,
       "joined_at": "2026-08-11T10:00:00Z",
       "member_name": "Chiamaka Okafor"
     }
@@ -410,7 +427,8 @@ Request body:
 Response `201`.
 
 Errors: `400` `validation_error`, `403` `forbidden` (non-owner granting
-`owner`), `404` `user_not_found`, `409` `already_member`.
+`owner`), `404` `user_not_found`, `409` `already_member`, `409`
+`personal_workspace` (the org is a personal workspace; create a new workspace).
 
 ### POST /v1/orgs/{orgID}/members/invite
 Invites an existing user by email. The invitation is created with status
@@ -428,7 +446,9 @@ Request body:
 Response `201`.
 
 Errors: `400` `validation_error`, `403` `forbidden` (non-owner granting
-`owner`), `404` `user_not_found`, `409` `already_member` / `invitation_pending`.
+`owner`), `404` `user_not_found`, `409` `already_member` / `invitation_pending`,
+`409` `personal_workspace` (the org is a personal workspace; create a new
+workspace).
 
 ### PATCH /v1/orgs/{orgID}/members/{userID}
 Changes a member's role. Permission: `member.role.update`.
@@ -441,7 +461,9 @@ Request body:
 
 Response `200`.
 
-Errors: `400` `validation_error`, `403` `forbidden`, `404` `membership_not_found`.
+Errors: `400` `validation_error`, `403` `forbidden`, `404` `membership_not_found`,
+`409` `personal_workspace` (the org is a personal workspace; create a new
+workspace).
 
 ### DELETE /v1/orgs/{orgID}/members/{userID}
 Removes a member from the organization. The owner cannot be removed. Permission:
@@ -449,7 +471,8 @@ Removes a member from the organization. The owner cannot be removed. Permission:
 
 Response `200`.
 
-Errors: `403` `forbidden`, `404` `membership_not_found`.
+Errors: `403` `forbidden`, `404` `membership_not_found`, `409`
+`personal_workspace` (the org is a personal workspace; create a new workspace).
 
 Client-role memberships are **not** listed here and **cannot** be removed or
 re-role'd through the membership endpoints:
@@ -461,6 +484,12 @@ re-role'd through the membership endpoints:
 - `DELETE /v1/orgs/{orgID}/members/{userID}` on a client-role membership
   returns `409 client_attached_to_project` — clients are removed exclusively
   through the project unassign flow.
+
+On a **personal workspace**, the personal guard fires first: every one of the
+four routes above (add, invite, role update, remove) returns
+`409 personal_workspace` before the role-specific checks — even for
+owner-target and owner-self operations. The role-specific behavior above
+applies on normal workspaces (`is_personal: false`).
 
 ---
 
@@ -1435,6 +1464,7 @@ service layer.
 | 409 | `organization_slug_exists` | Organization slug is already taken |
 | 409 | `already_member` | User already belongs to the organization |
 | 409 | `invitation_pending` | Invitation is already pending for this user |
+| 409 | `personal_workspace` | The org is a registration-created personal workspace; staff members cannot be added/invited/re-role'd/removed — create a new workspace |
 | 409 | `milestone_not_awaiting_approval` | Milestone is not in `awaiting_approval` state |
 | 409 | `client_attached_to_project` | Client membership is attached to a project; unassign instead |
 | 413 | `payload_too_large` | Request body exceeds the 1MB limit |

@@ -12,6 +12,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/mcchukwu/egentop/internal/apperrors"
 	"github.com/mcchukwu/egentop/internal/audit"
+	"github.com/mcchukwu/egentop/pkg/pagination"
 )
 
 func integrationDB(t *testing.T) *sql.DB {
@@ -203,5 +204,133 @@ func TestUpdateOrgNotFound(t *testing.T) {
 	err := svc.Update(ctx, uuid.New(), "New Name")
 	if !errors.Is(err, apperrors.ErrOrganizationNotFound) {
 		t.Fatalf("expected ErrOrganizationNotFound, got %v", err)
+	}
+}
+
+// TestCreateOrgIsNotPersonal: POST /v1/orgs (Service.Create) creates a normal
+// workspace — is_personal is false — even though registration default orgs are
+// personal.
+func TestCreateOrgIsNotPersonal(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	var ownerID uuid.UUID
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO users (email, password_hash, first_name, last_name)
+		VALUES ($1, 'hash', 'Owner', 'User')
+		RETURNING id
+	`, "org-not-personal-"+uuid.NewString()+"@example.com").Scan(&ownerID); err != nil {
+		t.Fatalf("insert owner: %v", err)
+	}
+
+	orgID, err := svc.Create(ctx, "Workspace "+uuid.NewString(), ownerID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	var isPersonal bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT is_personal FROM organizations WHERE id = $1
+	`, orgID).Scan(&isPersonal); err != nil {
+		t.Fatalf("read is_personal: %v", err)
+	}
+	if isPersonal {
+		t.Fatal("POST /v1/orgs created org must have is_personal = false")
+	}
+
+	// The DTO carries it too (GET /v1/orgs/{orgID}).
+	org, err := svc.GetByID(ctx, orgID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if org.IsPersonal {
+		t.Fatal("GetByID returned is_personal = true for a workspace org")
+	}
+}
+
+// TestOrgDTOExposesIsPersonal: the org detail payload and the org switcher
+// (GET /v1/orgs) both carry the is_personal flag, populated from the
+// organizations row — never silently false.
+func TestOrgDTOExposesIsPersonal(t *testing.T) {
+	db := integrationDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	svc := newTestService(db)
+
+	// Workspace org (is_personal = false).
+	var wsOwnerID uuid.UUID
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO users (email, password_hash, first_name, last_name)
+		VALUES ($1, 'hash', 'Ws', 'Owner')
+		RETURNING id
+	`, "org-dto-ws-"+uuid.NewString()+"@example.com").Scan(&wsOwnerID); err != nil {
+		t.Fatalf("insert ws owner: %v", err)
+	}
+	wsOrgID, err := svc.Create(ctx, "DTO Workspace", wsOwnerID)
+	if err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+
+	// Personal org (is_personal = true), same owner for the list check.
+	// The explicit slug mirrors what CreateTx always writes for production orgs.
+	var personalOrgID uuid.UUID
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO organizations (name, slug, is_personal)
+		VALUES ($1, $2, TRUE)
+		RETURNING id
+	`, "DTO Personal's Organization", "dto-personal-"+uuid.NewString()).Scan(&personalOrgID); err != nil {
+		t.Fatalf("insert personal org: %v", err)
+	}
+	var ownerRoleID uuid.UUID
+	if err := db.QueryRowContext(ctx, `
+		SELECT id FROM roles WHERE name = 'owner' AND organization_id IS NULL
+	`).Scan(&ownerRoleID); err != nil {
+		t.Fatalf("owner role: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO memberships (user_id, organization_id, role_id)
+		VALUES ($1, $2, $3)
+	`, wsOwnerID, personalOrgID, ownerRoleID); err != nil {
+		t.Fatalf("insert personal membership: %v", err)
+	}
+
+	// GET /v1/orgs/{orgID} detail for both.
+	ws, err := svc.GetByID(ctx, wsOrgID)
+	if err != nil {
+		t.Fatalf("GetByID workspace: %v", err)
+	}
+	if ws.IsPersonal {
+		t.Fatal("workspace detail is_personal = true, want false")
+	}
+
+	personal, err := svc.GetByID(ctx, personalOrgID)
+	if err != nil {
+		t.Fatalf("GetByID personal: %v", err)
+	}
+	if !personal.IsPersonal {
+		t.Fatal("personal detail is_personal = false, want true")
+	}
+
+	// GET /v1/orgs (switcher) carries the flag on each membership item.
+	memberships, _, err := svc.List(ctx, wsOwnerID, pagination.Query{Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	seen := map[uuid.UUID]bool{wsOrgID: false, personalOrgID: false}
+	for _, m := range memberships {
+		if _, ok := seen[m.OrganizationID]; !ok {
+			continue
+		}
+		seen[m.OrganizationID] = m.IsPersonal
+	}
+	if seen[wsOrgID] {
+		t.Fatal("workspace list item is_personal = true, want false")
+	}
+	if !seen[personalOrgID] {
+		t.Fatal("personal list item is_personal = false, want true")
 	}
 }

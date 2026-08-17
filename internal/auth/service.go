@@ -83,8 +83,10 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (string, st
 			return apperrors.ErrDatabase
 		}
 
-		// Create default organization (slug + owner membership + audit included)
-		if _, err := organization.CreateTx(dbCtx, tx, fmt.Sprintf("%s's Organization", req.FirstName), userID, s.audit); err != nil {
+		// Create default organization (slug + owner membership + audit included).
+		// The registration default is a PERSONAL workspace: no staff members may
+		// be added/invited/re-role'd/removed; clients remain allowed.
+		if _, err := organization.CreateTx(dbCtx, tx, fmt.Sprintf("%s's Organization", req.FirstName), userID, true, s.audit); err != nil {
 			return err
 		}
 

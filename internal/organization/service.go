@@ -29,7 +29,7 @@ func NewService(db *sql.DB, audit *audit.Service) *Service {
 	}
 }
 
-// Create creates a new organization
+// Create creates a new organization (a non-personal workspace).
 func (s *Service) Create(ctx context.Context, name string, ownerID uuid.UUID) (uuid.UUID, error) {
 	dbCtx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
@@ -38,7 +38,7 @@ func (s *Service) Create(ctx context.Context, name string, ownerID uuid.UUID) (u
 
 	err := db.WithTransaction(dbCtx, s.db, func(tx *sql.Tx) error {
 		var err error
-		orgID, err = CreateTx(dbCtx, tx, name, ownerID, s.audit)
+		orgID, err = CreateTx(dbCtx, tx, name, ownerID, false, s.audit)
 		return err
 	})
 
@@ -50,12 +50,16 @@ func (s *Service) Create(ctx context.Context, name string, ownerID uuid.UUID) (u
 // the single source of truth for org creation, shared by Service.Create and
 // auth.Service.Register.
 //
+// isPersonal marks the organization as a registration-created personal
+// workspace (no staff members may be added/invited/re-role'd/removed; clients
+// remain allowed). Registration passes true; Service.Create passes false.
+//
 // The slug is derived from name with a bounded retry loop: the first attempt
 // uses the plain slug; on a unique violation the slug is retried with a
 // random suffix. Each attempt runs behind a savepoint so a slug collision
 // does not abort the surrounding transaction. When all attempts are
 // exhausted, ErrOrganizationSlugExists is returned.
-func CreateTx(ctx context.Context, tx *sql.Tx, name string, ownerID uuid.UUID, auditSvc *audit.Service) (uuid.UUID, error) {
+func CreateTx(ctx context.Context, tx *sql.Tx, name string, ownerID uuid.UUID, isPersonal bool, auditSvc *audit.Service) (uuid.UUID, error) {
 	if name == "" {
 		return uuid.Nil, apperrors.ErrOrganizationNameInvalid
 	}
@@ -85,10 +89,10 @@ func CreateTx(ctx context.Context, tx *sql.Tx, name string, ownerID uuid.UUID, a
 		}
 
 		err := tx.QueryRowContext(ctx, `
-		INSERT INTO organizations (name, slug, status, created_at, updated_at)
-		VALUES ($1, $2, $3, NOW(), NOW())
+		INSERT INTO organizations (name, slug, status, is_personal, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, NOW(), NOW())
 		RETURNING id
-		`, name, string(generatedSlug), OrganizationStatusActive).Scan(&orgID)
+		`, name, string(generatedSlug), OrganizationStatusActive, isPersonal).Scan(&orgID)
 		if err != nil {
 			// Roll back to the savepoint, discarding the failed insert.
 			if _, rbErr := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT `+spName); rbErr != nil {
@@ -171,9 +175,11 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, q pagination.Query
 				m.role_id,
 				r.name AS role,
 				m.status,
-				m.joined_at
+				m.joined_at,
+				o.is_personal
 			FROM memberships m
 			JOIN roles r ON r.id = m.role_id
+			JOIN organizations o ON o.id = m.organization_id
 			WHERE m.user_id = $1
 			AND m.status = $2
 			ORDER BY m.joined_at DESC
@@ -193,7 +199,7 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, q pagination.Query
 		for rows.Next() {
 			var m membership.Membership
 
-			err := rows.Scan(&m.ID, &m.UserID, &m.OrganizationID, &m.RoleID, &m.Role, &m.Status, &m.JoinedAt)
+			err := rows.Scan(&m.ID, &m.UserID, &m.OrganizationID, &m.RoleID, &m.Role, &m.Status, &m.JoinedAt, &m.IsPersonal)
 			if err != nil {
 				return apperrors.ErrInternalServer
 			}
@@ -223,12 +229,13 @@ func (s *Service) GetByID(ctx context.Context, orgID uuid.UUID) (*Organization, 
 			name,
 			slug,
 			status,
+			is_personal,
 			created_at,
 			updated_at
 			FROM organizations
 			WHERE id = $1
 			AND status = $2
-		`, orgID, OrganizationStatusActive).Scan(&result.ID, &result.Name, &result.Slug, &result.Status, &result.CreatedAt, &result.UpdatedAt)
+		`, orgID, OrganizationStatusActive).Scan(&result.ID, &result.Name, &result.Slug, &result.Status, &result.IsPersonal, &result.CreatedAt, &result.UpdatedAt)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return apperrors.ErrOrganizationNotFound

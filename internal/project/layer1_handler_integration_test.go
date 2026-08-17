@@ -371,6 +371,38 @@ func clientLoginAndRotate(t *testing.T, handler http.Handler, email, oneTime str
 	return data.AccessToken
 }
 
+// createWorkspaceForStaff creates a normal (non-personal) workspace and makes
+// the staff user its owner — the POST /v1/orgs shape.
+func createWorkspaceForStaff(t *testing.T, db *sql.DB, staffID uuid.UUID) string {
+	t.Helper()
+	ctx := context.Background()
+
+	var orgID uuid.UUID
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO organizations (name, slug)
+		VALUES ($1, $2)
+		RETURNING id
+	`, "Guard Workspace", "guard-ws-"+uuid.NewString()).Scan(&orgID); err != nil {
+		t.Fatalf("insert workspace: %v", err)
+	}
+
+	var ownerRoleID uuid.UUID
+	if err := db.QueryRowContext(ctx, `
+		SELECT id FROM roles WHERE name = 'owner' AND organization_id IS NULL
+	`).Scan(&ownerRoleID); err != nil {
+		t.Fatalf("owner role: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO memberships (user_id, organization_id, role_id, status)
+		VALUES ($1, $2, $3, 'active')
+	`, staffID, orgID, ownerRoleID); err != nil {
+		t.Fatalf("workspace owner membership: %v", err)
+	}
+
+	return orgID.String()
+}
+
 // TestPhoneOnlyProvisionAndRegister: the phone is a primary identity channel;
 // phone-only registration (200) and phone-only provisioning (201) must work at
 // the HTTP boundary.
@@ -612,23 +644,40 @@ func TestHTTPMembershipAndStateGuards(t *testing.T) {
 		t.Fatalf("second changes-request error = %v, want milestone_not_awaiting_approval", env.Error)
 	}
 
-	// member.role.update on a client membership is 403.
+	// The registration org is now a PERSONAL workspace: the personal guard
+	// fires FIRST, so even a client-role target on the personal org returns
+	// 409 personal_workspace (not the 403 client-role protection).
 	roleBody, _ := json.Marshal(map[string]string{"role": "member"})
 	rr, env = httpDo(t, handler, http.MethodPatch, "/v1/orgs/"+orgID+"/members/"+clientID, staffToken, roleBody)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("role.update on client status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("role.update on client on personal org status = %d, want 409; body=%s", rr.Code, rr.Body.String())
 	}
-	if env.Error == nil || env.Error.Code != "forbidden" {
-		t.Fatalf("role.update on client error = %v, want forbidden", env.Error)
+	if env.Error == nil || env.Error.Code != "personal_workspace" {
+		t.Fatalf("role.update on client on personal org error = %v, want personal_workspace", env.Error)
 	}
 
-	// member.remove on a client membership is 409 client_attached_to_project.
-	rr, env = httpDo(t, handler, http.MethodDelete, "/v1/orgs/"+orgID+"/members/"+clientID, staffToken, nil)
+	// The client-role protections still hold on a NORMAL workspace: create
+	// one for the same staff user and provision a client there.
+	wsOrgID := createWorkspaceForStaff(t, db, uuid.MustParse(staffID))
+	wsClientID, _ := provisionClientViaHTTP(t, handler, staffToken, wsOrgID)
+
+	// member.role.update on a client membership is 403 on a workspace.
+	rr, env = httpDo(t, handler, http.MethodPatch, "/v1/orgs/"+wsOrgID+"/members/"+wsClientID, staffToken, roleBody)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("role.update on client on workspace status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+	if env.Error == nil || env.Error.Code != "forbidden" {
+		t.Fatalf("role.update on client on workspace error = %v, want forbidden", env.Error)
+	}
+
+	// member.remove on a client membership is 409 client_attached_to_project
+	// on a workspace.
+	rr, env = httpDo(t, handler, http.MethodDelete, "/v1/orgs/"+wsOrgID+"/members/"+wsClientID, staffToken, nil)
 	if rr.Code != http.StatusConflict {
-		t.Fatalf("member.remove on client status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("member.remove on client on workspace status = %d, want 409; body=%s", rr.Code, rr.Body.String())
 	}
 	if env.Error == nil || env.Error.Code != "client_attached_to_project" {
-		t.Fatalf("member.remove on client error = %v, want client_attached_to_project", env.Error)
+		t.Fatalf("member.remove on client on workspace error = %v, want client_attached_to_project", env.Error)
 	}
 
 	// The client membership still exists after the rejected removal.

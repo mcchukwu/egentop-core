@@ -50,6 +50,27 @@ func requireOwnerToGrantOwner(ctx context.Context, tx *sql.Tx, orgID, actorID uu
 	return nil
 }
 
+// requireNotPersonalWorkspace blocks every staff-membership mutation on a
+// registration-created personal workspace. It is called FIRST inside each
+// mutation's transaction (after the org row is loaded) so even owner-target
+// and owner-self operations return ErrPersonalWorkspace: the actor isn't
+// lacking permission — the workspace simply does not accept staff members.
+func requireNotPersonalWorkspace(ctx context.Context, tx *sql.Tx, orgID uuid.UUID) error {
+	var isPersonal bool
+	err := tx.QueryRowContext(ctx,
+		`SELECT is_personal FROM organizations WHERE id = $1`, orgID).Scan(&isPersonal)
+	if errors.Is(err, sql.ErrNoRows) {
+		return apperrors.ErrOrganizationNotFound
+	}
+	if err != nil {
+		return apperrors.ErrDatabase
+	}
+	if isPersonal {
+		return apperrors.ErrPersonalWorkspace
+	}
+	return nil
+}
+
 func NewService(db *sql.DB, auditService *audit.Service) *Service {
 	return &Service{
 		DB:           db,
@@ -64,6 +85,9 @@ func (s *Service) InviteOrgMember(ctx context.Context, orgID uuid.UUID, actorID 
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		if err := requireNotPersonalWorkspace(dbCtx, tx, orgID); err != nil {
+			return err
+		}
 		if err := requireOwnerToGrantOwner(dbCtx, tx, orgID, actorID, role); err != nil {
 			return err
 		}
@@ -149,6 +173,9 @@ func (s *Service) AddOrgMember(ctx context.Context, orgID uuid.UUID, actorID uui
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		if err := requireNotPersonalWorkspace(dbCtx, tx, orgID); err != nil {
+			return err
+		}
 		if err := requireOwnerToGrantOwner(dbCtx, tx, orgID, actorID, newMemberRole); err != nil {
 			return err
 		}
@@ -236,9 +263,11 @@ func (s *Service) GetOrgMembers(ctx context.Context, orgID uuid.UUID, q paginati
 				r.name AS role,
 				m.status,
 				m.joined_at,
+				o.is_personal,
 				u.first_name || ' ' || u.last_name AS member_name
 			FROM memberships m
 			JOIN roles r ON r.id = m.role_id
+			JOIN organizations o ON o.id = m.organization_id
 			LEFT JOIN users u ON u.id = m.user_id
 			WHERE m.organization_id = $1
 			AND r.name <> 'client'
@@ -255,7 +284,7 @@ func (s *Service) GetOrgMembers(ctx context.Context, orgID uuid.UUID, q paginati
 			var m Membership
 			var memberName sql.NullString
 
-			err := rows.Scan(&m.ID, &m.UserID, &m.OrganizationID, &m.RoleID, &m.Role, &m.Status, &m.JoinedAt, &memberName)
+			err := rows.Scan(&m.ID, &m.UserID, &m.OrganizationID, &m.RoleID, &m.Role, &m.Status, &m.JoinedAt, &m.IsPersonal, &memberName)
 			if err != nil {
 				return apperrors.ErrInternalServer
 			}
@@ -282,6 +311,10 @@ func (s *Service) RemoveOrgMember(ctx context.Context, orgID uuid.UUID, actorID 
 	defer cancel()
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		if err := requireNotPersonalWorkspace(dbCtx, tx, orgID); err != nil {
+			return err
+		}
+
 		// Never allow the organization owner to be removed
 		var targetRole Role
 
@@ -365,6 +398,9 @@ func (s *Service) UpdateOrgMemberRole(ctx context.Context, orgID uuid.UUID, acto
 	}
 
 	err := db.WithTransaction(dbCtx, s.DB, func(tx *sql.Tx) error {
+		if err := requireNotPersonalWorkspace(dbCtx, tx, orgID); err != nil {
+			return err
+		}
 		if err := requireOwnerToGrantOwner(dbCtx, tx, orgID, actorID, newRole); err != nil {
 			return err
 		}
