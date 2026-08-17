@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-08-17 — Personal default workspace (founder) + pre-redesign fix batch shipped
+
+**Decision:** (1) The registration-created default org is now a **personal workspace**: staff members cannot be added/invited/role-changed/removed (409 `personal_workspace` on all four member-mutation routes — even owner-target ops); collaboration requires creating a new workspace. **Clients remain allowed** (provision/assign/approval loop — the wedge — proven intact on personal orgs). Implemented `46c25bd` (migration 000007 + composite same-tx-timestamp backfill, 478 orgs marked in dev; 282 tests; docs updated). (2) Pre-redesign frontend fix batch shipped (`f112ece`/`5b63bf0`/`2d6bbef`/`d17dbc5`): textarea resize:none + char counters, client preview under plain `npm run dev` (predev dev-mode client build + vite /c/* middleware), revision-limit steppers (numbers-only, thumb-friendly), org-rename cache propagation. Tester VERIFIED 59/59 live checks; zero 429s (dev general limit raised to 600/min via `RATE_LIMIT_GENERAL_PER_MIN`).
+
+**Context:** Founder review of the current stage (2026-08-17): rate-limit pain (root cause: chatty query layer 33→6 requests/navigation + hardcoded 100/min general limit — both fixed), UI nits, and the personal-workspace product call ("like tldraw — your own space; create a workspace to collaborate").
+
+**Consequences:** Frontend redesign (R0+ per `docs/design-references-briefs/` — the committed design contract) starts after this batch. The member join-by-invite-link feature (invite tokens, accept, owner handover, leave/delete workspace) is the next backend slice in the R2 manage phase. Deploy (M-FE-4) unchanged. Known accepted: MEDIUM-4 org-existence oracle, residual swap deadlock, test-fixture leaks — none block validation.
+
+---
+
 ## 2026-08-16 — Lifecycle backend slice SHIPPED + verified (`924e1ab`, `811d178`, `1835f6b`)
 
 **Outcome:** The project-lifecycle slice is implemented, TDD'd, and independently verified (Tester: 274 live checks + 29 follow-up assertions, all pass; Reviewer: APPROVED; Security: no exploitable vulnerabilities, safe for validation). 247 tests, CI-equivalent. Contract: `egentop-frontend/docs/requirements.md` §14.
