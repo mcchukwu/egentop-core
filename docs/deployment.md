@@ -67,6 +67,7 @@ list of variables the application reads** (verified against
 | `JWT_REFRESH_TTL` | e.g. `720h` |
 | `CORS_ALLOWED_ORIGINS` | The **real** client origin(s), comma-separated, no wildcards |
 | `LOG_LEVEL` | `info` (default) — one of `debug`, `info`, `warn`, `error` (case-insensitive; unknown values fall back to `info`). `debug`/`info` keep Info+Warn+Error, `warn` drops Info, `error` drops Info+Warn (Error always prints) |
+| `RATE_LIMIT_GENERAL_PER_MIN` | `100` (default) — general per-IP API limit in requests/minute; floor `20` (lower values are rejected at startup). Raise for local dev/manual testing where all developers share one IP; keep the production default |
 
 Template: [`deploy/env/egentop.env.example`](../deploy/env/egentop.env.example)
 — install to `/etc/egentop/egentop.env` (root:egentop, mode 0640).

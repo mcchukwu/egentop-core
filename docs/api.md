@@ -90,12 +90,18 @@ this shape:
 | `POST /v1/auth/login` | 5 / minute |
 | `POST /v1/auth/refresh` | 10 / minute |
 | `POST /v1/me/password` | 5 / minute |
-| Everything else | 100 / minute |
+| Everything else | 100 / minute (configurable via `RATE_LIMIT_GENERAL_PER_MIN`; default 100, floor 20) |
 
 Exceeding a limit returns `429 Too Many Requests` with a **plain-text** body
 (`too many requests`) — the limiter runs in middleware, before the JSON error
 envelope, so the `rate_limited` JSON code in the error handler is not produced
 by any current route.
+
+The general (non-auth) limit is configurable through the
+`RATE_LIMIT_GENERAL_PER_MIN` environment variable (default 100/minute,
+minimum 20 — lower values are rejected at startup). The auth-specific limits
+above (register/login/refresh/password-change) are fixed anti-brute-force
+posture and are not configurable.
 
 The limit is keyed on the request's **real IP**: the `X-Real-IP` header when it
 parses as a valid IP, otherwise the socket peer (`RemoteAddr`). `X-Forwarded-For`

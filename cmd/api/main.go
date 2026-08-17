@@ -48,7 +48,7 @@ func main() {
 	logger.Info("Connected to database")
 
 	// Configure middleware
-	rateLimiterMiddleware := middleware.NewRateLimiterMiddleware(100, time.Minute)
+	rateLimiterMiddleware := middleware.NewRateLimiterMiddleware(cfg.GeneralRateLimitPerMin, time.Minute)
 	loginLimiterMiddleware := middleware.NewRateLimiterMiddleware(5, time.Minute)
 	registerLimiterMiddleware := middleware.NewRateLimiterMiddleware(3, time.Minute)
 	refreshLimiterMiddleware := middleware.NewRateLimiterMiddleware(10, time.Minute)
