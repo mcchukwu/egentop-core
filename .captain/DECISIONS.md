@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-08-17 — R2 workspace-management design ratified (Captain, per the Database Specialist's flagged decisions)
+
+**Decision:** The R2 design (invite links, leave/transfer/delete workspace) is accepted with all recommended defaults ratified:
+1. **No invite-token expiry** (MVP) — enable/disable + regenerate are the revocation tools; `expires_at` is a cheap future column.
+2. **Email-invite endpoint + `invited` status stay** (existing contract); link-accept **upgrades an `invited` row preserving its role** (it's the missing activation step; the role was granted deliberately by an authorized admin/owner).
+3. **Outgoing owner → `admin`** after ownership transfer (retains manage powers, loses owner-only actions).
+4. **Delete workspace = SOFT delete** (`organizations.deleted_at`, all children preserved — FK analysis proved hard delete CASCADE-destroys history; audit/authz rows would lose the org reference). No restore endpoint this slice; frontend uses a confirm dialog.
+5. **Regenerate always enables** the link (a regenerated-but-disabled state is confusing).
+6. Absent invite reads as `{token:null, enabled:false, created_at:null}` ("create link" state).
+7. Slug stays permanently occupied after delete (partial unique index is a future change with a down-trap; accepted).
+8. **Join lookup collapses disabled/unknown/deleted/suspended/personal → single 404 `invite_not_found`** (anti-enumeration, consistent with login/deleted-project posture).
+9. Public `GET /invites/{token}` rate-limited (register-class limiter).
+10. **Join flow = two-step** (register → accept); no accept-on-register coupling this slice.
+11. Owner-only permissions seeded: `org.delete`, `org.transfer_ownership`.
+12. `organizations.status='deleted'` enum value stays unused (single source of truth = `deleted_at`; avoids the dual-state trap).
+
+**Context:** The manage modal (R1) renders invite-link/leave/delete placeholders; this slice is their backend. Design details: migration 000008 (deleted_at + `organization_invites` table + owner-only permission seeds), `internal/invite` package, `membership.LeaveOrgMember`/`TransferOwnership`, `organization.Delete` (soft), `LoadOrg` deleted→404 branch, `requireNotPersonalWorkspace` gains `deleted_at IS NULL` + `FOR UPDATE` (closes the delete-vs-membership race). API contract: GET /orgs/invites/{token} (public), POST accept, GET/PATCH /orgs/{orgID}/invite, POST /invite/regenerate, DELETE /members/me, PATCH /orgs/{orgID}/owner, DELETE /orgs/{orgID}.
+
+**Consequences:** Backend Builder implements per the design + tests (38 planned). Frontend: join page (`/join/{token}`) + manage-modal wiring come next.
+
+---
+
 ## 2026-08-17 — Personal default workspace (founder) + pre-redesign fix batch shipped
 
 **Decision:** (1) The registration-created default org is now a **personal workspace**: staff members cannot be added/invited/role-changed/removed (409 `personal_workspace` on all four member-mutation routes — even owner-target ops); collaboration requires creating a new workspace. **Clients remain allowed** (provision/assign/approval loop — the wedge — proven intact on personal orgs). Implemented `46c25bd` (migration 000007 + composite same-tx-timestamp backfill, 478 orgs marked in dev; 282 tests; docs updated). (2) Pre-redesign frontend fix batch shipped (`f112ece`/`5b63bf0`/`2d6bbef`/`d17dbc5`): textarea resize:none + char counters, client preview under plain `npm run dev` (predev dev-mode client build + vite /c/* middleware), revision-limit steppers (numbers-only, thumb-friendly), org-rename cache propagation. Tester VERIFIED 59/59 live checks; zero 429s (dev general limit raised to 600/min via `RATE_LIMIT_GENERAL_PER_MIN`).
